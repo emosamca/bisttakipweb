@@ -30,7 +30,8 @@
       <button class="btn primary block" id="openPurchase">+ Alım Ekle</button>
       <button class="btn block" id="openCash">+ Nakit / Temettü Ekle</button>
       <button class="btn block" id="openAdjust">⚖ Nakit Düzeltme</button>
-      <button class="btn block" id="openPrice">+ Fiyat Güncelle</button>
+      <button class="btn block" id="openPrice">+ Fiyat Ekle</button>
+      <button class="btn block" id="openCalc">🧮 Hesap Makinesi</button>
       <button class="btn block hidden" id="openUsers">👥 Kullanıcılar</button>
       <button class="btn block" id="openChangePw">🔑 Parola Değiştir</button>
       <div class="sidebar-spacer"></div>
@@ -70,6 +71,10 @@
         <div class="card">
           <div class="card-label">Toplam Temettü Geliri</div>
           <div class="card-value" id="cardDiv">—</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Ödenen Komisyon (Kom.+BSMV)</div>
+          <div class="card-value" id="cardCommission">—</div>
         </div>
       </section>
 
@@ -113,7 +118,7 @@
         <section class="panel">
           <div class="panel-head">
             <h3>Fiyat Tablosu</h3>
-            <button class="btn small" id="openPrice2">+ Fiyat Ekle / Güncelle</button>
+            <button class="btn small" id="openPrice2">+ Fiyat Ekle</button>
           </div>
           <div class="table-wrap">
             <table id="pricesTable" class="compact">
@@ -154,6 +159,7 @@
                 <tr>
                   <th>Tarih</th><th>Hisse</th><th class="num">Adet</th>
                   <th class="num">Fiyat</th><th class="num">Toplam</th>
+                  <th class="num">Kom.+BSMV</th>
                   <th>Kaynak</th><th class="num">$ Kur</th><th></th>
                 </tr>
               </thead>
@@ -212,10 +218,18 @@
         <label>Dolar Kuru (₺/$)
           <input type="number" id="pUsd" step="any" min="0" placeholder="opsiyonel" />
         </label>
+        <label>Komisyon (%)
+          <input type="number" id="pCommission" step="any" min="0" placeholder="örn. 0.2" />
+        </label>
+        <label>BSMV (%)
+          <input type="number" id="pBsmv" step="any" min="0" placeholder="örn. 5" />
+        </label>
       </div>
 
-      <div class="calc-box">
-        <div><span>Toplam Tutar:</span> <strong id="pTotal">₺0,00</strong></div>
+      <div class="calc-box calc-box-grid">
+        <div><span>Ara Toplam:</span> <strong id="pSubtotal">₺0,00</strong></div>
+        <div><span>Komisyon + BSMV:</span> <strong id="pFees">₺0,00</strong></div>
+        <div><span>Toplam Maliyet:</span> <strong id="pTotal">₺0,00</strong></div>
         <div><span>Dolar Karşılığı:</span> <strong id="pUsdTotal">—</strong></div>
       </div>
 
@@ -292,7 +306,7 @@
   <div id="priceModal" class="modal hidden">
     <form class="modal-card" id="priceForm">
       <div class="modal-head">
-        <h3>Fiyat Ekle / Güncelle</h3>
+        <h3>Fiyat Ekle</h3>
         <button type="button" class="x" data-close>×</button>
       </div>
       <div class="grid2">
@@ -303,7 +317,7 @@
           <input type="number" id="prPrice" step="any" min="0" required />
         </label>
       </div>
-      <div class="info-box">Aynı hisse tekrar girilirse fiyatı güncellenir.</div>
+      <div class="info-box">Yeni bir hissenin güncel fiyatını ekleyin. Fiyat güncellemeleri otomatik servis tarafından yapılır.</div>
       <div class="modal-foot">
         <button type="button" class="btn ghost" data-close>İptal</button>
         <button type="submit" class="btn primary">Kaydet</button>
@@ -391,6 +405,33 @@
         <button type="submit" class="btn primary">Kaydet</button>
       </div>
       <div class="error hidden" id="userFormError"></div>
+    </form>
+  </div>
+
+  <!-- HESAP MAKINESI MODAL (duzenli alim / DCA) -->
+  <div id="calcModal" class="modal hidden">
+    <form class="modal-card" id="calcForm">
+      <div class="modal-head">
+        <h3>Hesap Makinesi · Düzenli Alım</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="info-box">Seçilen hisseden, başlangıç tarihinden itibaren <strong>her işlem günü</strong> kapanış fiyatından girdiğiniz tutarda alım yapılsaydı bugün ne olurdu?</div>
+      <div class="grid2">
+        <label>Hisse
+          <select id="calcSymbol" required></select>
+        </label>
+        <label>Başlangıç Tarihi
+          <input type="date" id="calcStart" lang="tr" min="2025-08-01" value="2025-08-01" required />
+        </label>
+        <label class="full">Günlük Alım Tutarı (₺)
+          <input type="number" id="calcDaily" step="any" min="0" placeholder="örn. 100" required />
+        </label>
+      </div>
+      <div class="modal-foot">
+        <button type="submit" class="btn primary">Hesapla</button>
+      </div>
+      <div id="calcResult" class="calc-result hidden"></div>
+      <div class="error hidden" id="calcError"></div>
     </form>
   </div>
 

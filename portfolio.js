@@ -121,6 +121,17 @@ async function summary(userId) {
     `SELECT COALESCE(SUM(amount),0) AS v FROM cash_movements WHERE user_id = $1 AND kind = 'dividend'`,
     [userId]
   );
+  // su ana kadar odenen toplam komisyon+bsmv = total - (adet*fiyat)
+  const commRes = await db.query(
+    `SELECT COALESCE(SUM(total - quantity * price),0) AS v FROM purchases WHERE user_id = $1`,
+    [userId]
+  );
+  // net yatirilan para: nakit girisleri (temettu ve Nakit duzeltme haric)
+  const contribRes = await db.query(
+    `SELECT COALESCE(SUM(amount),0) AS v FROM cash_movements
+      WHERE user_id = $1 AND kind = 'cash' AND COALESCE(note,'') <> 'Nakit düzeltme'`,
+    [userId]
+  );
 
   return {
     cash,
@@ -129,6 +140,8 @@ async function summary(userId) {
     totalDividends,
     totalDeposits: Number(cashInRes.rows[0].v),
     totalDividendIncome: Number(allDivRes.rows[0].v),
+    totalCommission: Number(commRes.rows[0].v),
+    netContributions: Number(contribRes.rows[0].v),
     portfolioValueAtCost: totalCostBasis,
     totalCurrentValue: hasAnyPrice ? totalCurrentValue : null,
     totalProfit: hasAnyPrice ? totalProfit : null,
@@ -169,7 +182,11 @@ async function portfolioHistory(userId, fromDate = '2025-08-01') {
               SUM(ph.close * (
                 SELECT COALESCE(SUM(p.quantity), 0) FROM purchases p
                  WHERE p.user_id = $1 AND p.symbol = ph.symbol AND p.trade_date <= ph.date
-              )) AS value
+              )) AS value,
+              (SELECT COALESCE(SUM(c.amount), 0) FROM cash_movements c
+                 WHERE c.user_id = $1 AND c.kind = 'cash'
+                   AND COALESCE(c.note, '') <> 'Nakit düzeltme'
+                   AND c.move_date <= ph.date) AS deposits
          FROM price_history ph
         WHERE ph.symbol IN (SELECT DISTINCT symbol FROM purchases WHERE user_id = $1)
           AND ph.date >= GREATEST($2::date,
@@ -178,9 +195,62 @@ async function portfolioHistory(userId, fromDate = '2025-08-01') {
         ORDER BY ph.date`,
       [userId, fromDate]
     );
-    return res.rows.map((r) => ({ date: r.date, value: Number(r.value) }));
+    return res.rows.map((r) => ({
+      date: r.date,
+      value: Number(r.value),
+      deposits: Number(r.deposits),
+    }));
   } catch (err) {
     if (err.code === '42P01') return []; // price_history tablosu yoksa
+    throw err;
+  }
+}
+
+// Gecmis fiyati olan hisse kodlari (hesap makinesi dropdown'u icin)
+async function historySymbols() {
+  try {
+    const r = await db.query('SELECT DISTINCT symbol FROM price_history ORDER BY symbol');
+    return r.rows.map((x) => x.symbol);
+  } catch (err) {
+    if (err.code === '42P01') return [];
+    throw err;
+  }
+}
+
+// Duzenli alim (DCA) hesabi: start tarihinden itibaren her islem gununde
+// 'daily' TL'lik alim yapilsaydi bugun ne kadar olurdu.
+async function dca(symbol, start, daily) {
+  const sym = symbol.trim().toUpperCase();
+  const startDate = start < '2025-08-01' ? '2025-08-01' : start;
+  try {
+    const r = await db.query(
+      `SELECT date, close FROM price_history
+        WHERE symbol = $1 AND date >= $2 AND close > 0
+        ORDER BY date`,
+      [sym, startDate]
+    );
+    let shares = 0;
+    for (const row of r.rows) shares += daily / Number(row.close);
+    const days = r.rows.length;
+    const invested = days * daily;
+    const lastClose = days ? Number(r.rows[days - 1].close) : 0;
+    const lastDate = days ? r.rows[days - 1].date : null;
+    const currentValue = shares * lastClose;
+    return {
+      symbol: sym,
+      start: startDate,
+      daily,
+      days,
+      invested,
+      totalShares: shares,
+      lastDate,
+      lastClose,
+      currentValue,
+      profit: currentValue - invested,
+      profitPct: invested > 0 ? ((currentValue - invested) / invested) * 100 : 0,
+    };
+  } catch (err) {
+    if (err.code === '42P01') return { symbol: sym, days: 0, invested: 0, totalShares: 0, currentValue: 0, profit: 0, profitPct: 0, lastClose: 0, lastDate: null, start: startDate, daily };
     throw err;
   }
 }
@@ -211,4 +281,6 @@ module.exports = {
   dividendStats,
   portfolioHistory,
   priceOnDate,
+  historySymbols,
+  dca,
 };

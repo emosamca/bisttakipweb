@@ -131,6 +131,10 @@ input:focus, select:focus { border-color: var(--primary); }
 .value-chart .xtick { fill: var(--muted); font-size: 11px; text-anchor: middle; }
 .value-chart .vline { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 3; }
 .value-chart .livelbl { fill: var(--green); font-size: 11px; font-weight: 600; }
+.chart-legend { display: flex; gap: 18px; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+.chart-legend .cl-item { display: flex; align-items: center; gap: 6px; }
+.chart-legend .cl-line { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
+.chart-legend .cl-line.dash { background: repeating-linear-gradient(90deg, #d29922 0 4px, transparent 4px 7px) !important; }
 .vc-tip { position: absolute; transform: translate(-50%, -130%); background: var(--bg); border: 1px solid var(--primary); border-radius: 8px; padding: 6px 10px; font-size: 12px; pointer-events: none; white-space: nowrap; box-shadow: var(--shadow); z-index: 5; }
 .vc-tip strong { color: var(--primary-hover); }
 
@@ -195,8 +199,16 @@ tbody tr:hover { background: var(--bg-elev); }
 .modal-foot { display: flex; justify-content: flex-end; gap: 10px; }
 
 .calc-box { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; display: flex; gap: 30px; }
+.calc-box-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 30px; }
 .calc-box span { color: var(--muted); }
 .info-box { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--muted); }
+
+/* ---- Hesap makinesi sonucu ---- */
+.calc-result { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.calc-result .cr-row { display: flex; justify-content: space-between; gap: 16px; font-size: 14px; }
+.calc-result .cr-row span { color: var(--muted); }
+.calc-result .cr-row strong { font-weight: 600; }
+.calc-result .cr-big { font-size: 18px; border-top: 1px solid var(--border); padding-top: 10px; margin-top: 2px; }
 .info-box.has-data { border-color: var(--primary); color: var(--text); }
 
 .error { color: var(--red); font-size: 13px; }

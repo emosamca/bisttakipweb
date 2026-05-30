@@ -67,6 +67,14 @@ async function isInRecentPasswords(userId, newPlain, n = 3) {
   return false;
 }
 
+// Toplam maliyet = ara toplam + komisyon, sonra komisyon uzerine bsmv
+function computeTotal(qty, price, commissionRate, bsmvRate) {
+  const base = qty * price;
+  const commission = (base * (commissionRate || 0)) / 100;
+  const bsmv = (commission * (bsmvRate || 0)) / 100;
+  return Math.round((base + commission + bsmv) * 10000) / 10000;
+}
+
 // ---- Kimlik dogrulama ----
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body || {};
@@ -294,6 +302,32 @@ app.get('/api/price-on', requireAuth, async (req, res) => {
   }
 });
 
+// ---- Hesap makinesi: gecmis fiyati olan hisseler ----
+app.get('/api/history-symbols', requireAuth, async (req, res) => {
+  try {
+    res.json(await portfolio.historySymbols());
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Liste alinamadi' });
+  }
+});
+
+// ---- Hesap makinesi: duzenli alim (DCA) hesabi ----
+app.get('/api/dca', requireAuth, async (req, res) => {
+  const { symbol, start, daily } = req.query;
+  if (!symbol || !start || daily === undefined) {
+    return res.status(400).json({ error: 'symbol, start ve daily gerekli' });
+  }
+  const d = Number(daily);
+  if (!(d > 0)) return res.status(400).json({ error: 'Gunluk alim degeri pozitif olmali' });
+  try {
+    res.json(await portfolio.dca(symbol, start, d));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Hesaplanamadi' });
+  }
+});
+
 // ---- Portfoy degeri zaman serisi (price_history.close) ----
 app.get('/api/portfolio-history', requireAuth, async (req, res) => {
   try {
@@ -333,7 +367,8 @@ app.get('/api/holdings-before', requireAuth, async (req, res) => {
 
 // ---- Alim ekle ----
 app.post('/api/purchases', requireAuth, async (req, res) => {
-  const { trade_date, symbol, quantity, price, source, usd_rate } = req.body || {};
+  const { trade_date, symbol, quantity, price, source, usd_rate, commission_rate, bsmv_rate } =
+    req.body || {};
   if (!trade_date || !symbol || !quantity || price === undefined || price === null) {
     return res.status(400).json({ error: 'Tarih, hisse, adet ve fiyat gerekli' });
   }
@@ -344,13 +379,15 @@ app.post('/api/purchases', requireAuth, async (req, res) => {
   }
   const src = source === 'temettu' ? 'temettu' : 'normal';
   const usd = usd_rate ? Number(usd_rate) : null;
-  const total = qty * prc;
+  const comm = commission_rate ? Number(commission_rate) : 0;
+  const bsmv = bsmv_rate ? Number(bsmv_rate) : 0;
+  const total = computeTotal(qty, prc, comm, bsmv);
   const sym = symbol.trim().toUpperCase();
   try {
     const r = await db.query(
-      `INSERT INTO purchases (user_id, trade_date, symbol, quantity, price, source, usd_rate, total)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [req.session.userId, trade_date, sym, qty, prc, src, usd, total]
+      `INSERT INTO purchases (user_id, trade_date, symbol, quantity, price, source, usd_rate, commission_rate, bsmv_rate, total)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [req.session.userId, trade_date, sym, qty, prc, src, usd, comm, bsmv, total]
     );
     // Daha once girilmemis bir hisse ise ortak fiyat tablosuna 0 ile ekle
     // (mevcutsa dokunma). Windows servisi sonradan fiyati gunceller.
@@ -471,7 +508,8 @@ app.delete('/api/cash/:id', requireAuth, async (req, res) => {
 
 // ---- Alim duzenle ----
 app.put('/api/purchases/:id', requireAuth, async (req, res) => {
-  const { trade_date, symbol, quantity, price, source, usd_rate } = req.body || {};
+  const { trade_date, symbol, quantity, price, source, usd_rate, commission_rate, bsmv_rate } =
+    req.body || {};
   if (!trade_date || !symbol || !quantity || price === undefined || price === null) {
     return res.status(400).json({ error: 'Tarih, hisse, adet ve fiyat gerekli' });
   }
@@ -482,13 +520,16 @@ app.put('/api/purchases/:id', requireAuth, async (req, res) => {
   }
   const src = source === 'temettu' ? 'temettu' : 'normal';
   const usd = usd_rate ? Number(usd_rate) : null;
-  const total = qty * prc;
+  const comm = commission_rate ? Number(commission_rate) : 0;
+  const bsmv = bsmv_rate ? Number(bsmv_rate) : 0;
+  const total = computeTotal(qty, prc, comm, bsmv);
   try {
     const r = await db.query(
       `UPDATE purchases
-          SET trade_date=$1, symbol=$2, quantity=$3, price=$4, source=$5, usd_rate=$6, total=$7
-        WHERE id=$8 AND user_id=$9 RETURNING *`,
-      [trade_date, symbol.trim().toUpperCase(), qty, prc, src, usd, total, req.params.id, req.session.userId]
+          SET trade_date=$1, symbol=$2, quantity=$3, price=$4, source=$5, usd_rate=$6,
+              commission_rate=$7, bsmv_rate=$8, total=$9
+        WHERE id=$10 AND user_id=$11 RETURNING *`,
+      [trade_date, symbol.trim().toUpperCase(), qty, prc, src, usd, comm, bsmv, total, req.params.id, req.session.userId]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Kayit bulunamadi' });
     res.json(r.rows[0]);

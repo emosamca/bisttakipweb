@@ -63,10 +63,12 @@ CREATE TABLE IF NOT EXISTS purchases (
   symbol      TEXT NOT NULL,
   quantity    NUMERIC(18,4) NOT NULL CHECK (quantity > 0),
   price       NUMERIC(18,4) NOT NULL CHECK (price >= 0),
-  source      TEXT NOT NULL DEFAULT 'normal',   -- 'normal' | 'temettu'
-  usd_rate    NUMERIC(18,6),                    -- alis anindaki dolar kuru (TL/USD)
-  total       NUMERIC(18,4) NOT NULL,           -- quantity * price
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  source          TEXT NOT NULL DEFAULT 'normal',   -- 'normal' | 'temettu'
+  usd_rate        NUMERIC(18,6),                    -- alis anindaki dolar kuru (TL/USD)
+  commission_rate NUMERIC(8,4) NOT NULL DEFAULT 0,  -- komisyon yuzdesi
+  bsmv_rate       NUMERIC(8,4) NOT NULL DEFAULT 0,  -- bsmv yuzdesi (komisyon uzerine)
+  total           NUMERIC(18,4) NOT NULL,           -- ara toplam + komisyon + bsmv
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Nakit hareketleri ve temettuler
@@ -102,6 +104,10 @@ const MIGRATIONS = `
 -- Eski users tablosuna yeni sutunlari ekle
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'normal';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false;
+
+-- Eski purchases tablosuna komisyon/bsmv sutunlari (eski kayitlar 0)
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(8,4) NOT NULL DEFAULT 0;
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS bsmv_rate NUMERIC(8,4) NOT NULL DEFAULT 0;
 
 -- Gecmisi olmayan kullanicilar icin mevcut parolayi gecmise tohumla
 INSERT INTO password_history (user_id, password)

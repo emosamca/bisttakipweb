@@ -149,6 +149,8 @@ function openPurchaseModal(row) {
     $('pPrice').value = row.price;
     $('pSource').value = row.source;
     $('pUsd').value = row.usd_rate || '';
+    $('pCommission').value = row.commission_rate != null ? Number(row.commission_rate) : '';
+    $('pBsmv').value = row.bsmv_rate != null ? Number(row.bsmv_rate) : '';
     priceManual = true; // duzenlemede mevcut fiyatin uzerine yazma
   } else {
     $('purchaseTitle').textContent = 'Alım Ekle';
@@ -156,6 +158,9 @@ function openPurchaseModal(row) {
     $('pSource').value = 'normal';
     $('pDate').value = todayStr();
     $('pSymbol').value = lastUsedSymbol();
+    // komisyon/bsmv son girilen degerleri hatirla
+    $('pCommission').value = localStorage.getItem('lastCommission') || '';
+    $('pBsmv').value = localStorage.getItem('lastBsmv') || '';
     priceManual = false; // tarih/hisseye gore otomatik doldurulabilir
   }
   updatePurchaseCalc();
@@ -181,7 +186,15 @@ function updatePurchaseCalc() {
   const qty = Number($('pQty').value) || 0;
   const price = Number($('pPrice').value) || 0;
   const rate = Number($('pUsd').value) || 0;
-  const total = qty * price;
+  const comm = Number($('pCommission').value) || 0;
+  const bsmv = Number($('pBsmv').value) || 0;
+  const base = qty * price;
+  const commission = (base * comm) / 100;
+  const bsmvAmt = (commission * bsmv) / 100;
+  const fees = commission + bsmvAmt;
+  const total = base + fees;
+  $('pSubtotal').textContent = tl(base);
+  $('pFees').textContent = tl(fees);
   $('pTotal').textContent = tl(total);
   $('pUsdTotal').textContent = rate > 0 ? usd(total / rate) : '—';
 }
@@ -233,7 +246,9 @@ async function maybeAutofillPrice() {
   } catch (_) {}
 }
 
-['pQty', 'pUsd'].forEach((id) => $(id).addEventListener('input', updatePurchaseCalc));
+['pQty', 'pUsd', 'pCommission', 'pBsmv'].forEach((id) =>
+  $(id).addEventListener('input', updatePurchaseCalc)
+);
 // Fiyat alanini kullanici elle degistirirse otomatik doldurmayi durdur
 $('pPrice').addEventListener('input', () => {
   priceManual = true;
@@ -254,6 +269,8 @@ $('purchaseForm').addEventListener('submit', async (e) => {
   const err = $('pError');
   err.classList.add('hidden');
   const id = $('pId').value;
+  const commission = $('pCommission').value || 0;
+  const bsmv = $('pBsmv').value || 0;
   const body = JSON.stringify({
     trade_date: $('pDate').value,
     symbol: $('pSymbol').value,
@@ -261,6 +278,8 @@ $('purchaseForm').addEventListener('submit', async (e) => {
     price: $('pPrice').value,
     source: $('pSource').value,
     usd_rate: $('pUsd').value || null,
+    commission_rate: commission,
+    bsmv_rate: bsmv,
   });
   try {
     await api(id ? `/api/purchases/${id}` : '/api/purchases', {
@@ -269,6 +288,9 @@ $('purchaseForm').addEventListener('submit', async (e) => {
     });
     const sym = $('pSymbol').value.trim().toUpperCase();
     if (sym) localStorage.setItem('lastSymbol', sym);
+    // komisyon/bsmv degerlerini hatirla
+    localStorage.setItem('lastCommission', $('pCommission').value || '');
+    localStorage.setItem('lastBsmv', $('pBsmv').value || '');
     closeModal('purchaseModal');
     refreshAll();
   } catch (e2) {
@@ -467,6 +489,7 @@ async function refreshAll() {
 // historyCache: price_history (close) bazli gecmis; liveValue: prices bazli ANLIK deger
 let historyCache = [];
 let liveValue = null;
+let liveDeposits = null;
 
 async function loadPortfolioHistory() {
   historyCache = await api('/api/portfolio-history');
@@ -479,10 +502,18 @@ function renderValueChartCombined() {
   let liveIdx = -1;
   if (liveValue != null) {
     const today = todayStr();
+    // canli noktada yatirilan = guncel net katki; yoksa son gecmis degeri tasi
+    const dep =
+      liveDeposits != null
+        ? liveDeposits
+        : series.length
+        ? series[series.length - 1].deposits
+        : 0;
+    const point = { date: today, value: liveValue, deposits: dep };
     if (series.length && series[series.length - 1].date === today) {
-      series[series.length - 1] = { date: today, value: liveValue };
+      series[series.length - 1] = point;
     } else {
-      series.push({ date: today, value: liveValue });
+      series.push(point);
     }
     liveIdx = series.length - 1;
   }
@@ -506,19 +537,23 @@ function renderValueChart(series, liveIdx = -1) {
   const W = 900, H = 280, pad = { l: 70, r: 16, t: 16, b: 30 };
   const innerW = W - pad.l - pad.r;
   const innerH = H - pad.t - pad.b;
-  const vals = series.map((s) => s.value);
-  let min = Math.min(...vals);
-  let max = Math.max(...vals);
+  const hasDep = series.some((s) => s.deposits != null);
+  // min/max her iki seriyi de kapsasin
+  const allVals = series.flatMap((s) => (hasDep ? [s.value, s.deposits] : [s.value]));
+  let min = Math.min(...allVals);
+  let max = Math.max(...allVals);
   if (min === max) { min = min * 0.95; max = max * 1.05 || 1; }
-  // alt sinirin biraz altina pay birak
-  min = Math.max(0, min - (max - min) * 0.08);
+  min = Math.max(0, min - (max - min) * 0.08); // alta pay
   const X = (i) => pad.l + innerW * (i / (series.length - 1));
   const Y = (v) => pad.t + innerH * (1 - (v - min) / (max - min));
 
-  const line = series.map((s, i) => `${i === 0 ? 'M' : 'L'}${X(i).toFixed(1)},${Y(s.value).toFixed(1)}`).join(' ');
-  const area = `${line} L${X(series.length - 1).toFixed(1)},${(pad.t + innerH).toFixed(1)} L${X(0).toFixed(1)},${(pad.t + innerH).toFixed(1)} Z`;
+  const valueLine = series.map((s, i) => `${i === 0 ? 'M' : 'L'}${X(i).toFixed(1)},${Y(s.value).toFixed(1)}`).join(' ');
+  const area = `${valueLine} L${X(series.length - 1).toFixed(1)},${(pad.t + innerH).toFixed(1)} L${X(0).toFixed(1)},${(pad.t + innerH).toFixed(1)} Z`;
+  const depLine = hasDep
+    ? series.map((s, i) => `${i === 0 ? 'M' : 'L'}${X(i).toFixed(1)},${Y(s.deposits).toFixed(1)}`).join(' ')
+    : '';
 
-  // y ekseni cizgileri + etiketleri
+  // y ekseni
   let grid = '';
   const yTicks = 4;
   for (let i = 0; i <= yTicks; i++) {
@@ -527,7 +562,7 @@ function renderValueChart(series, liveIdx = -1) {
     grid += `<line class="grid" x1="${pad.l}" y1="${y.toFixed(1)}" x2="${W - pad.r}" y2="${y.toFixed(1)}"/>`;
     grid += `<text class="ytick" x="${pad.l - 8}" y="${(y + 4).toFixed(1)}">${kfmt(v)}</text>`;
   }
-  // x ekseni etiketleri
+  // x ekseni
   let xlab = '';
   const xCount = Math.min(6, series.length);
   for (let i = 0; i < xCount; i++) {
@@ -535,7 +570,7 @@ function renderValueChart(series, liveIdx = -1) {
     xlab += `<text class="xtick" x="${X(idx).toFixed(1)}" y="${H - 10}">${shortDate(series[idx].date)}</text>`;
   }
 
-  // "su an" (canli) noktasi: kalici yesil isaret + etiket
+  // "su an" (canli) noktasi
   let liveMarker = '';
   if (liveIdx >= 0) {
     const lx = X(liveIdx), ly = Y(series[liveIdx].value);
@@ -545,44 +580,67 @@ function renderValueChart(series, liveIdx = -1) {
       `<text class="livelbl" x="${lx.toFixed(1)}" y="${(ly - 10).toFixed(1)}" text-anchor="${anchor}">şu an</text>`;
   }
 
+  const depPath = hasDep
+    ? `<path d="${depLine}" fill="none" stroke="#d29922" stroke-width="2" stroke-dasharray="5 4"/>`
+    : '';
+
   box.innerHTML =
-    `<svg viewBox="0 0 ${W} ${H}">
+    `<div class="chart-legend">
+       <span class="cl-item"><span class="cl-line" style="background:#2f81f7"></span>Portföy Değeri</span>
+       ${hasDep ? '<span class="cl-item"><span class="cl-line dash" style="background:#d29922"></span>Yatırılan Para</span>' : ''}
+     </div>
+     <svg viewBox="0 0 ${W} ${H}">
       <defs><linearGradient id="vgrad" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="#2f81f7" stop-opacity="0.35"/>
         <stop offset="100%" stop-color="#2f81f7" stop-opacity="0"/>
       </linearGradient></defs>
       ${grid}
       <path d="${area}" fill="url(#vgrad)"/>
-      <path d="${line}" fill="none" stroke="#2f81f7" stroke-width="2"/>
+      ${depPath}
+      <path d="${valueLine}" fill="none" stroke="#2f81f7" stroke-width="2"/>
       ${xlab}
       ${liveMarker}
       <line id="vcVline" class="vline" style="display:none"/>
+      <circle id="vcDotDep" r="4" fill="#d29922" stroke="#0d1117" stroke-width="1.5" style="display:none"/>
       <circle id="vcDot" r="4" fill="#2f81f7" stroke="#0d1117" stroke-width="1.5" style="display:none"/>
       <rect x="${pad.l}" y="${pad.t}" width="${innerW}" height="${innerH}" fill="transparent" id="vcHit"/>
     </svg>
     <div id="vcTip" class="vc-tip" style="display:none"></div>`;
 
   const svg = box.querySelector('svg');
-  const dot = $('vcDot'), vline = $('vcVline'), tip = $('vcTip');
+  const dot = $('vcDot'), dotDep = $('vcDotDep'), vline = $('vcVline'), tip = $('vcTip');
   const onMove = (e) => {
     const rect = svg.getBoundingClientRect();
-    const fx = (e.clientX - rect.left) / rect.width; // 0..1 svg geneli
+    const fx = (e.clientX - rect.left) / rect.width;
     const fStart = pad.l / W, fEnd = (W - pad.r) / W;
     let f = (fx - fStart) / (fEnd - fStart);
     f = Math.max(0, Math.min(1, f));
     const idx = Math.round(f * (series.length - 1));
-    const px = X(idx), py = Y(series[idx].value);
+    const s = series[idx];
+    const px = X(idx), py = Y(s.value);
     dot.setAttribute('cx', px); dot.setAttribute('cy', py); dot.style.display = '';
     vline.setAttribute('x1', px); vline.setAttribute('x2', px);
     vline.setAttribute('y1', pad.t); vline.setAttribute('y2', pad.t + innerH); vline.style.display = '';
-    tip.innerHTML = `<strong>${shortDate(series[idx].date)}</strong><br>${tl(series[idx].value)}`;
+    let tipHtml = `<strong>${shortDate(s.date)}</strong>` +
+      `<br><span style="color:#4493f8">Değer:</span> ${tl(s.value)}`;
+    if (hasDep) {
+      const pyd = Y(s.deposits);
+      dotDep.setAttribute('cx', px); dotDep.setAttribute('cy', pyd); dotDep.style.display = '';
+      const pl = s.value - s.deposits;
+      const plColor = pl >= 0 ? '#3fb950' : '#f85149';
+      tipHtml +=
+        `<br><span style="color:#e3b341">Yatırılan:</span> ${tl(s.deposits)}` +
+        `<br><span style="color:${plColor}">K/Z:</span> ${tl(pl)}`;
+    }
+    tip.innerHTML = tipHtml;
     tip.style.display = '';
     tip.style.left = `${(px / W) * rect.width}px`;
-    tip.style.top = `${(py / H) * rect.height}px`;
+    tip.style.top = `${(Math.min(py, hasDep ? Y(s.deposits) : py) / H) * rect.height}px`;
   };
   svg.addEventListener('mousemove', onMove);
   svg.addEventListener('mouseleave', () => {
-    dot.style.display = 'none'; vline.style.display = 'none'; tip.style.display = 'none';
+    dot.style.display = 'none'; dotDep.style.display = 'none';
+    vline.style.display = 'none'; tip.style.display = 'none';
   });
 }
 
@@ -631,6 +689,7 @@ async function loadSummary() {
   $('cardAssets').textContent = s.totalAssets !== null ? tl(s.totalAssets) : '—';
   $('cardCost').textContent = tl(s.totalCostBasis);
   $('cardDiv').textContent = tl(s.totalDividendIncome);
+  $('cardCommission').textContent = tl(s.totalCommission || 0);
 
   if (s.totalProfit !== null) {
     const cls = s.totalProfit >= 0 ? 'pos' : 'neg';
@@ -648,8 +707,9 @@ async function loadSummary() {
 
   renderPie(s.holdings, s.cash);
 
-  // canli portfoy degerini grafigin son noktasi olarak guncelle
+  // canli portfoy degeri ve yatirilan parayi grafigin son noktasi olarak guncelle
   liveValue = s.totalCurrentValue;
+  liveDeposits = s.netContributions != null ? s.netContributions : null;
   renderValueChartCombined();
 
   const tb = $('holdingsTable').querySelector('tbody');
@@ -717,13 +777,17 @@ function renderPurchases() {
   );
   const tb = $('purchasesTable').querySelector('tbody');
   if (!rows.length) {
-    tb.innerHTML = '<tr class="empty-row"><td colspan="8">Kayıt yok</td></tr>';
+    tb.innerHTML = '<tr class="empty-row"><td colspan="9">Kayıt yok</td></tr>';
     renderPager('purchasesPager', 1, 0, () => {});
     return;
   }
   // filtrelenmis toplam (tum sayfalar)
+  const fee = (r) => Number(r.total) - Number(r.quantity) * Number(r.price);
+  // 0,00'a yuvarlanan (veya kayan nokta artigi) degerleri cizgi goster
+  const showFee = (v) => (v >= 0.005 ? tl(v) : '—');
   const totQty = rows.reduce((s, r) => s + Number(r.quantity), 0);
   const totAmt = rows.reduce((s, r) => s + Number(r.total), 0);
+  const totFee = rows.reduce((s, r) => s + fee(r), 0);
   // gecerli sayfayi sinirla ve dilimle
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   if (purchasePage > pages) purchasePage = pages;
@@ -737,6 +801,7 @@ function renderPurchases() {
         <td class="num">${num(r.quantity)}</td>
         <td class="num">${tl(r.price)}</td>
         <td class="num">${tl(r.total)}</td>
+        <td class="num">${showFee(fee(r))}</td>
         <td><span class="tag ${r.source}">${r.source === 'temettu' ? 'Temettü' : 'Normal'}</span></td>
         <td class="num">${r.usd_rate ? num(r.usd_rate) : '—'}</td>
         <td><div class="row-actions">
@@ -751,6 +816,7 @@ function renderPurchases() {
         <td class="num"><strong>${num(totQty)}</strong></td>
         <td></td>
         <td class="num"><strong>${tl(totAmt)}</strong></td>
+        <td class="num"><strong>${showFee(totFee)}</strong></td>
         <td colspan="3"></td>
       </tr>`;
   tb.querySelectorAll('[data-edit-p]').forEach((b) =>
@@ -826,15 +892,11 @@ async function loadPrices() {
         <td class="num">${tl(r.price)}</td>
         <td class="muted">${new Date(r.updated_at).toLocaleString('tr-TR')}</td>
         <td><div class="row-actions">
-          <button class="edit-btn" data-edit-pr="${r.symbol}" data-price="${r.price}" title="Güncelle">✏️</button>
           <button class="del-btn" data-del-pr="${r.id}" title="Sil">🗑</button>
         </div></td>
       </tr>`
     )
     .join('');
-  tb.querySelectorAll('[data-edit-pr]').forEach((b) =>
-    b.addEventListener('click', () => openPriceModal(b.dataset.editPr, b.dataset.price))
-  );
   tb.querySelectorAll('[data-del-pr]').forEach((b) =>
     b.addEventListener('click', () => del('prices', b.dataset.delPr))
   );
@@ -1008,6 +1070,64 @@ async function deleteUser(id, name) {
     errBox.classList.remove('hidden');
   }
 }
+
+// ---- Hesap makinesi (duzenli alim / DCA) ----
+let calcSymbolsLoaded = false;
+$('openCalc').addEventListener('click', async () => {
+  $('calcError').classList.add('hidden');
+  $('calcResult').classList.add('hidden');
+  openModal('calcModal');
+  if (!calcSymbolsLoaded) {
+    try {
+      const syms = await api('/api/history-symbols');
+      $('calcSymbol').innerHTML = syms.length
+        ? syms.map((s) => `<option value="${s}">${s}</option>`).join('')
+        : '<option value="">(geçmiş fiyat verisi yok)</option>';
+      calcSymbolsLoaded = true;
+    } catch (e) {
+      $('calcError').textContent = e.message;
+      $('calcError').classList.remove('hidden');
+    }
+  }
+});
+
+$('calcForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('calcError');
+  err.classList.add('hidden');
+  const symbol = $('calcSymbol').value;
+  const start = $('calcStart').value;
+  const daily = $('calcDaily').value;
+  if (!symbol) {
+    err.textContent = 'Hisse seçin';
+    err.classList.remove('hidden');
+    return;
+  }
+  try {
+    const r = await api(
+      `/api/dca?symbol=${encodeURIComponent(symbol)}&start=${start}&daily=${encodeURIComponent(daily)}`
+    );
+    const box = $('calcResult');
+    if (!r.days) {
+      box.innerHTML = '<div class="cr-row"><span>Bu tarih aralığında fiyat verisi bulunamadı.</span></div>';
+      box.classList.remove('hidden');
+      return;
+    }
+    const plClass = r.profit >= 0 ? 'pos' : 'neg';
+    box.innerHTML =
+      `<div class="cr-row"><span>${r.symbol} · ${shortDate(r.start)} → ${shortDate(r.lastDate)}</span><strong>${r.days} işlem günü</strong></div>` +
+      `<div class="cr-row"><span>Günlük alım</span><strong>${tl(r.daily)}</strong></div>` +
+      `<div class="cr-row"><span>Toplam yatırılan</span><strong>${tl(r.invested)}</strong></div>` +
+      `<div class="cr-row"><span>Biriken hisse adedi</span><strong>${num(r.totalShares)}</strong></div>` +
+      `<div class="cr-row"><span>Son kapanış (${shortDate(r.lastDate)})</span><strong>${tl(r.lastClose)}</strong></div>` +
+      `<div class="cr-row cr-big"><span>Bugünkü değer</span><strong>${tl(r.currentValue)}</strong></div>` +
+      `<div class="cr-row"><span>Kâr / Zarar</span><strong class="${plClass}">${tl(r.profit)} (%${r.profitPct.toFixed(1)})</strong></div>`;
+    box.classList.remove('hidden');
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
 
 // ---- Baslangic: oturum kontrolu ----
 (async () => {
