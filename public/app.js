@@ -17,12 +17,24 @@ async function api(path, opts = {}) {
     throw new Error('Oturum sona erdi');
   }
   const data = await res.json().catch(() => ({}));
+  // Parola degisimi zorunluysa (sunucu kapisi) zorunlu modali ac
+  if (res.status === 403 && data.mustChange && !path.endsWith('/change-password')) {
+    openForcedChange();
+    throw new Error(data.error || 'Parola degistirilmeli');
+  }
   if (!res.ok) throw new Error(data.error || 'Hata');
   return data;
 }
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
+}
+
+// HTML kacis (kullanici girdisi guvenligi)
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+  );
 }
 
 // Tarih alanini fokusla (gg.aa.yyyy formatinda ilk segment GUN olur).
@@ -35,10 +47,23 @@ function showLogin() {
   $('appView').classList.add('hidden');
   $('loginView').classList.remove('hidden');
 }
-function showApp(username) {
+let currentRole = 'normal';
+function showApp(username, role, mustChange) {
   $('loginView').classList.add('hidden');
   $('appView').classList.remove('hidden');
   $('userName').textContent = username || '';
+  currentRole = role || 'normal';
+  const badge = $('userRole');
+  badge.textContent = currentRole === 'admin' ? 'admin' : 'normal';
+  badge.className = `role-badge ${currentRole}`;
+  badge.classList.remove('hidden');
+  // Kullanicilar menusu yalnizca admin
+  $('openUsers').classList.toggle('hidden', currentRole !== 'admin');
+
+  if (mustChange) {
+    openForcedChange(); // zorunlu parola degisimi; pano yuklenmez
+    return;
+  }
   refreshAll();
   connectEvents();
 }
@@ -82,7 +107,7 @@ $('loginForm').addEventListener('submit', async (e) => {
       method: 'POST',
       body: JSON.stringify({ username: $('loginUser').value, password: $('loginPass').value }),
     });
-    showApp(data.username);
+    showApp(data.username, data.role, data.mustChange);
   } catch (e2) {
     err.textContent = e2.message;
     err.classList.remove('hidden');
@@ -99,11 +124,15 @@ $('logoutBtn').addEventListener('click', async () => {
 const openModal = (id) => $(id).classList.remove('hidden');
 const closeModal = (id) => $(id).classList.add('hidden');
 document.querySelectorAll('[data-close]').forEach((b) =>
-  b.addEventListener('click', (e) => e.target.closest('.modal').classList.add('hidden'))
+  b.addEventListener('click', (e) => {
+    const modal = e.target.closest('.modal');
+    if (modal.classList.contains('locked')) return; // zorunlu modal kapatilamaz
+    modal.classList.add('hidden');
+  })
 );
 document.querySelectorAll('.modal').forEach((m) =>
   m.addEventListener('click', (e) => {
-    if (e.target === m) m.classList.add('hidden');
+    if (e.target === m && !m.classList.contains('locked')) m.classList.add('hidden');
   })
 );
 
@@ -817,11 +846,174 @@ async function del(type, id) {
   refreshAll();
 }
 
+// ---- Parola degistir (kendi) + ilk giris zorunlu degisimi ----
+let pwForced = false;
+
+function openChangePw() {
+  pwForced = false;
+  $('pwForm').reset();
+  $('pwError').classList.add('hidden');
+  $('pwTitle').textContent = 'Parola Değiştir';
+  $('pwForcedNote').classList.add('hidden');
+  $('pwClose').classList.remove('hidden');
+  $('pwCancel').classList.remove('hidden');
+  $('pwModal').classList.remove('locked');
+  openModal('pwModal');
+}
+
+function openForcedChange() {
+  pwForced = true;
+  $('pwForm').reset();
+  $('pwError').classList.add('hidden');
+  $('pwTitle').textContent = 'Parolanızı Belirleyin';
+  $('pwForcedNote').classList.remove('hidden');
+  // zorunlu: kapatma/iptal yok
+  $('pwClose').classList.add('hidden');
+  $('pwCancel').classList.add('hidden');
+  $('pwModal').classList.add('locked');
+  openModal('pwModal');
+}
+
+$('openChangePw').addEventListener('click', openChangePw);
+
+$('pwForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('pwError');
+  err.classList.add('hidden');
+  const cur = $('pwCurrent').value;
+  const n1 = $('pwNew').value;
+  const n2 = $('pwNew2').value;
+  if (n1 !== n2) {
+    err.textContent = 'Yeni parolalar eşleşmiyor';
+    err.classList.remove('hidden');
+    return;
+  }
+  try {
+    await api('/api/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword: cur, newPassword: n1 }),
+    });
+    $('pwModal').classList.remove('locked');
+    closeModal('pwModal');
+    if (pwForced) {
+      // zorunlu degisim tamam: panoyu yukle
+      pwForced = false;
+      refreshAll();
+      connectEvents();
+    } else {
+      alert('Parolanız değiştirildi.');
+    }
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
+// ---- Kullanici yonetimi (admin) ----
+$('openUsers').addEventListener('click', () => {
+  openModal('usersModal');
+  loadUsers();
+});
+
+let usersCache = [];
+async function loadUsers() {
+  const errBox = $('usersError');
+  errBox.classList.add('hidden');
+  const tb = $('usersTable').querySelector('tbody');
+  try {
+    usersCache = await api('/api/users');
+    tb.innerHTML = usersCache
+      .map(
+        (u) => `<tr>
+          <td><strong>${esc(u.username)}</strong></td>
+          <td><span class="role-badge ${u.role}">${u.role === 'admin' ? 'admin' : 'normal'}</span></td>
+          <td>${u.must_change_password ? '<span class="muted">İlk giriş parolası bekliyor</span>' : 'Aktif'}</td>
+          <td><div class="row-actions">
+            <button class="edit-btn" data-edit-u="${u.id}" title="Düzenle">✏️</button>
+            <button class="del-btn" data-del-u="${u.id}" title="Sil">🗑</button>
+          </div></td>
+        </tr>`
+      )
+      .join('');
+    tb.querySelectorAll('[data-edit-u]').forEach((b) =>
+      b.addEventListener('click', () => openUserForm(usersCache.find((x) => x.id == b.dataset.editU)))
+    );
+    tb.querySelectorAll('[data-del-u]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const u = usersCache.find((x) => x.id == b.dataset.delU);
+        deleteUser(u.id, u.username);
+      })
+    );
+  } catch (e2) {
+    errBox.textContent = e2.message;
+    errBox.classList.remove('hidden');
+  }
+}
+
+function openUserForm(user) {
+  $('userForm').reset();
+  $('userFormError').classList.add('hidden');
+  if (user) {
+    $('userFormTitle').textContent = 'Kullanıcı Düzenle';
+    $('uId').value = user.id;
+    $('uUsername').value = user.username;
+    $('uRole').value = user.role;
+    $('uPwHint').textContent = '(boş bırakılırsa değişmez)';
+    $('uPassword').required = false;
+  } else {
+    $('userFormTitle').textContent = 'Yeni Kullanıcı';
+    $('uId').value = '';
+    $('uRole').value = 'normal';
+    $('uPwHint').textContent = '(en az 6 karakter)';
+    $('uPassword').required = true;
+  }
+  openModal('userFormModal');
+}
+
+$('newUserBtn').addEventListener('click', () => openUserForm(null));
+
+$('userForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('userFormError');
+  err.classList.add('hidden');
+  const id = $('uId').value;
+  const body = {
+    username: $('uUsername').value,
+    role: $('uRole').value,
+  };
+  const pw = $('uPassword').value;
+  if (pw) body.password = pw;
+  try {
+    await api(id ? `/api/users/${id}` : '/api/users', {
+      method: id ? 'PUT' : 'POST',
+      body: JSON.stringify(body),
+    });
+    closeModal('userFormModal');
+    loadUsers();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
+async function deleteUser(id, name) {
+  if (!confirm(`"${name}" kullanıcısı ve tüm portföy verileri silinsin mi? Bu işlem geri alınamaz.`)) return;
+  const errBox = $('usersError');
+  errBox.classList.add('hidden');
+  try {
+    await api(`/api/users/${id}`, { method: 'DELETE' });
+    loadUsers();
+  } catch (e2) {
+    errBox.textContent = e2.message;
+    errBox.classList.remove('hidden');
+  }
+}
+
 // ---- Baslangic: oturum kontrolu ----
 (async () => {
   try {
     const me = await api('/api/me');
-    showApp(me.username);
+    showApp(me.username, me.role, me.mustChange);
   } catch {
     showLogin();
   }

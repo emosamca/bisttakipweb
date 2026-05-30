@@ -22,9 +22,49 @@ app.use(
 );
 
 // ---- Yardimcilar ----
+// Parola degisimi zorunluyken yalnizca bu yollara izin var
+const ALLOW_DURING_CHANGE = new Set(['/api/change-password', '/api/logout', '/api/me']);
+
 function requireAuth(req, res, next) {
-  if (req.session && req.session.userId) return next();
-  return res.status(401).json({ error: 'Giris yapilmamis' });
+  if (!(req.session && req.session.userId)) {
+    return res.status(401).json({ error: 'Giris yapilmamis' });
+  }
+  if (req.session.mustChange && !ALLOW_DURING_CHANGE.has(req.path)) {
+    return res.status(403).json({ error: 'Once parolanizi degistirmelisiniz', mustChange: true });
+  }
+  next();
+}
+
+async function requireAdmin(req, res, next) {
+  if (!(req.session && req.session.userId)) {
+    return res.status(401).json({ error: 'Giris yapilmamis' });
+  }
+  try {
+    const r = await db.query('SELECT role, must_change_password FROM users WHERE id = $1', [
+      req.session.userId,
+    ]);
+    if (!r.rows.length) return res.status(401).json({ error: 'Kullanici bulunamadi' });
+    if (r.rows[0].must_change_password) {
+      return res.status(403).json({ error: 'Once parolanizi degistirmelisiniz', mustChange: true });
+    }
+    if (r.rows[0].role !== 'admin') return res.status(403).json({ error: 'Yetkiniz yok' });
+    next();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatasi' });
+  }
+}
+
+// Yeni parolanin son N parola ile ayni olup olmadigini kontrol et
+async function isInRecentPasswords(userId, newPlain, n = 3) {
+  const r = await db.query(
+    'SELECT password FROM password_history WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2',
+    [userId, n]
+  );
+  for (const row of r.rows) {
+    if (await bcrypt.compare(newPlain, row.password)) return true;
+  }
+  return false;
 }
 
 // ---- Kimlik dogrulama ----
@@ -45,7 +85,14 @@ app.post('/api/login', async (req, res) => {
     }
     req.session.userId = user.id;
     req.session.username = user.username;
-    res.json({ ok: true, username: user.username });
+    req.session.role = user.role;
+    req.session.mustChange = user.must_change_password;
+    res.json({
+      ok: true,
+      username: user.username,
+      role: user.role,
+      mustChange: user.must_change_password,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Sunucu hatasi' });
@@ -56,11 +103,169 @@ app.post('/api/logout', (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
-app.get('/api/me', (req, res) => {
-  if (req.session && req.session.userId) {
-    return res.json({ username: req.session.username });
+app.get('/api/me', async (req, res) => {
+  if (!(req.session && req.session.userId)) {
+    return res.status(401).json({ error: 'Giris yapilmamis' });
   }
-  res.status(401).json({ error: 'Giris yapilmamis' });
+  try {
+    const r = await db.query(
+      'SELECT username, role, must_change_password FROM users WHERE id = $1',
+      [req.session.userId]
+    );
+    if (!r.rows.length) return res.status(401).json({ error: 'Kullanici bulunamadi' });
+    req.session.role = r.rows[0].role;
+    req.session.mustChange = r.rows[0].must_change_password;
+    res.json({
+      username: r.rows[0].username,
+      role: r.rows[0].role,
+      mustChange: r.rows[0].must_change_password,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatasi' });
+  }
+});
+
+// ---- Kendi parolasini degistir (ilk giris zorunlu degisimi de buradan) ----
+app.post('/api/change-password', requireAuth, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Mevcut ve yeni parola gerekli' });
+  }
+  if (String(newPassword).length < 6) {
+    return res.status(400).json({ error: 'Yeni parola en az 6 karakter olmali' });
+  }
+  try {
+    const r = await db.query('SELECT * FROM users WHERE id = $1', [req.session.userId]);
+    const user = r.rows[0];
+    if (!user || !(await bcrypt.compare(currentPassword, user.password))) {
+      return res.status(400).json({ error: 'Mevcut parola hatali' });
+    }
+    if (await isInRecentPasswords(user.id, newPassword, 3)) {
+      return res.status(400).json({ error: 'Son 3 parolanizdan birini tekrar kullanamazsiniz' });
+    }
+    const hash = await bcrypt.hash(newPassword, 10);
+    await db.query('UPDATE users SET password = $1, must_change_password = false WHERE id = $2', [
+      hash,
+      user.id,
+    ]);
+    await db.query('INSERT INTO password_history (user_id, password) VALUES ($1, $2)', [
+      user.id,
+      hash,
+    ]);
+    req.session.mustChange = false;
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Parola degistirilemedi' });
+  }
+});
+
+// ---- Kullanici yonetimi (yalnizca admin) ----
+app.get('/api/users', requireAdmin, async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT id, username, role, must_change_password, created_at
+         FROM users ORDER BY username`
+    );
+    res.json(r.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Liste alinamadi' });
+  }
+});
+
+app.post('/api/users', requireAdmin, async (req, res) => {
+  const { username, password, role } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Kullanici adi ve parola gerekli' });
+  }
+  if (String(password).length < 6) {
+    return res.status(400).json({ error: 'Parola en az 6 karakter olmali' });
+  }
+  const rl = role === 'admin' ? 'admin' : 'normal';
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const r = await db.query(
+      `INSERT INTO users (username, password, role, must_change_password)
+       VALUES ($1, $2, $3, true)
+       RETURNING id, username, role, must_change_password, created_at`,
+      [username.trim(), hash, rl]
+    );
+    await db.query('INSERT INTO password_history (user_id, password) VALUES ($1, $2)', [
+      r.rows[0].id,
+      hash,
+    ]);
+    res.json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Bu kullanici adi zaten var' });
+    console.error(err);
+    res.status(500).json({ error: 'Kullanici eklenemedi' });
+  }
+});
+
+app.put('/api/users/:id', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const { username, role, password } = req.body || {};
+  try {
+    const t = await db.query('SELECT * FROM users WHERE id = $1', [id]);
+    if (!t.rows.length) return res.status(404).json({ error: 'Kullanici bulunamadi' });
+    const target = t.rows[0];
+    const newRole = role ? (role === 'admin' ? 'admin' : 'normal') : target.role;
+    const newUsername = username ? username.trim() : target.username;
+
+    // Son admin'in yetkisini dusurmeyi engelle
+    if (target.role === 'admin' && newRole !== 'admin') {
+      const c = await db.query("SELECT COUNT(*)::int AS c FROM users WHERE role = 'admin'");
+      if (c.rows[0].c <= 1) {
+        return res.status(400).json({ error: 'Son admin yetkisi kaldirilamaz' });
+      }
+    }
+
+    if (password) {
+      if (String(password).length < 6) {
+        return res.status(400).json({ error: 'Parola en az 6 karakter olmali' });
+      }
+      const hash = await bcrypt.hash(password, 10);
+      await db.query(
+        'UPDATE users SET username = $1, role = $2, password = $3, must_change_password = true WHERE id = $4',
+        [newUsername, newRole, hash, id]
+      );
+      await db.query('INSERT INTO password_history (user_id, password) VALUES ($1, $2)', [id, hash]);
+    } else {
+      await db.query('UPDATE users SET username = $1, role = $2 WHERE id = $3', [
+        newUsername,
+        newRole,
+        id,
+      ]);
+    }
+    if (id === req.session.userId) req.session.role = newRole;
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Bu kullanici adi zaten var' });
+    console.error(err);
+    res.status(500).json({ error: 'Guncellenemedi' });
+  }
+});
+
+app.delete('/api/users/:id', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (id === req.session.userId) {
+    return res.status(400).json({ error: 'Kendi hesabinizi silemezsiniz' });
+  }
+  try {
+    const t = await db.query('SELECT role FROM users WHERE id = $1', [id]);
+    if (!t.rows.length) return res.status(404).json({ error: 'Kullanici bulunamadi' });
+    if (t.rows[0].role === 'admin') {
+      const c = await db.query("SELECT COUNT(*)::int AS c FROM users WHERE role = 'admin'");
+      if (c.rows[0].c <= 1) return res.status(400).json({ error: 'Son admin silinemez' });
+    }
+    await db.query('DELETE FROM users WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Silinemedi' });
+  }
 });
 
 // ---- Dashboard ozeti ----
@@ -401,11 +606,22 @@ app.use(express.static(path.join(__dirname, 'public')));
 async function ensureDefaultUser() {
   const u = (process.env.DEFAULT_USER || 'admin').trim();
   const p = process.env.DEFAULT_PASSWORD || 'admin123';
-  const existing = await db.query('SELECT id FROM users WHERE username = $1', [u]);
+  const existing = await db.query('SELECT id, role FROM users WHERE username = $1', [u]);
   if (existing.rows.length === 0) {
     const hash = await bcrypt.hash(p, 10);
-    await db.query('INSERT INTO users (username, password) VALUES ($1,$2)', [u, hash]);
-    console.log(`Varsayilan kullanici olusturuldu: ${u} / ${p}`);
+    const r = await db.query(
+      "INSERT INTO users (username, password, role, must_change_password) VALUES ($1,$2,'admin',false) RETURNING id",
+      [u, hash]
+    );
+    await db.query('INSERT INTO password_history (user_id, password) VALUES ($1,$2)', [
+      r.rows[0].id,
+      hash,
+    ]);
+    console.log(`Varsayilan admin kullanici olusturuldu: ${u} / ${p}`);
+  } else if (existing.rows[0].role !== 'admin') {
+    // Mevcut varsayilan kullaniciyi admin yap
+    await db.query("UPDATE users SET role = 'admin' WHERE id = $1", [existing.rows[0].id]);
+    console.log(`Mevcut '${u}' kullanicisi admin yapildi.`);
   }
 }
 

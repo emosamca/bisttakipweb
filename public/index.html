@@ -31,9 +31,14 @@
       <button class="btn block" id="openCash">+ Nakit / Temettü Ekle</button>
       <button class="btn block" id="openAdjust">⚖ Nakit Düzeltme</button>
       <button class="btn block" id="openPrice">+ Fiyat Güncelle</button>
+      <button class="btn block hidden" id="openUsers">👥 Kullanıcılar</button>
+      <button class="btn block" id="openChangePw">🔑 Parola Değiştir</button>
       <div class="sidebar-spacer"></div>
       <div class="user-box">
-        <span id="userName" class="muted"></span>
+        <div class="user-meta">
+          <span id="userName" class="muted"></span>
+          <span id="userRole" class="role-badge hidden"></span>
+        </div>
         <button class="btn ghost small" id="logoutBtn">Çıkış</button>
       </div>
     </aside>
@@ -304,6 +309,88 @@
         <button type="submit" class="btn primary">Kaydet</button>
       </div>
       <div class="error hidden" id="prError"></div>
+    </form>
+  </div>
+
+  <!-- PAROLA DEGISTIR MODAL (kendi parolasi; ayrica ilk giris zorunlu degisimi) -->
+  <div id="pwModal" class="modal hidden">
+    <form class="modal-card" id="pwForm">
+      <div class="modal-head">
+        <h3 id="pwTitle">Parola Değiştir</h3>
+        <button type="button" class="x" data-close id="pwClose">×</button>
+      </div>
+      <div class="info-box hidden" id="pwForcedNote">İlk girişiniz: devam etmek için lütfen yeni bir parola belirleyin.</div>
+      <label>Mevcut Parola
+        <input type="password" id="pwCurrent" autocomplete="current-password" required />
+      </label>
+      <label>Yeni Parola (en az 6 karakter)
+        <input type="password" id="pwNew" autocomplete="new-password" required />
+      </label>
+      <label>Yeni Parola (tekrar)
+        <input type="password" id="pwNew2" autocomplete="new-password" required />
+      </label>
+      <div class="info-box">Son 3 parolanızı tekrar kullanamazsınız.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close id="pwCancel">İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="pwError"></div>
+    </form>
+  </div>
+
+  <!-- KULLANICI YONETIMI MODAL (admin) -->
+  <div id="usersModal" class="modal hidden">
+    <div class="modal-card wide">
+      <div class="modal-head">
+        <h3>Kullanıcılar</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="panel-head">
+        <span class="muted">Kullanıcıları ekleyin, düzenleyin veya silin.</span>
+        <button class="btn small primary" id="newUserBtn">+ Yeni Kullanıcı</button>
+      </div>
+      <div class="table-wrap">
+        <table id="usersTable">
+          <thead>
+            <tr>
+              <th>Kullanıcı Adı</th><th>Tip</th><th>Parola Durumu</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="error hidden" id="usersError"></div>
+    </div>
+  </div>
+
+  <!-- KULLANICI EKLE / DUZENLE MODAL (admin) -->
+  <div id="userFormModal" class="modal hidden">
+    <form class="modal-card" id="userForm">
+      <input type="hidden" id="uId" />
+      <div class="modal-head">
+        <h3 id="userFormTitle">Yeni Kullanıcı</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Kullanıcı Adı
+          <input type="text" id="uUsername" autocomplete="off" required />
+        </label>
+        <label>Kullanıcı Tipi
+          <select id="uRole">
+            <option value="normal" selected>Normal</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+        <label class="full" id="uPwWrap">Parola <span id="uPwHint" class="muted"></span>
+          <input type="password" id="uPassword" autocomplete="new-password" />
+        </label>
+      </div>
+      <div class="info-box">Kullanıcı bu parolayla ilk girişinde kendi parolasını değiştirmek zorunda kalır.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="userFormError"></div>
     </form>
   </div>
 

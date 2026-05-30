@@ -38,11 +38,22 @@ async function init() {
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
+  id                    SERIAL PRIMARY KEY,
+  username              TEXT NOT NULL UNIQUE,
+  password              TEXT NOT NULL,
+  role                  TEXT NOT NULL DEFAULT 'normal',  -- 'admin' | 'normal'
+  must_change_password  BOOLEAN NOT NULL DEFAULT false,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Parola gecmisi (son 3 parolayi tekrar engellemek icin)
+CREATE TABLE IF NOT EXISTS password_history (
   id          SERIAL PRIMARY KEY,
-  username    TEXT NOT NULL UNIQUE,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   password    TEXT NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS idx_pwhist_user ON password_history(user_id);
 
 -- Hisse alimlari
 CREATE TABLE IF NOT EXISTS purchases (
@@ -88,6 +99,15 @@ CREATE INDEX IF NOT EXISTS idx_cash_user ON cash_movements(user_id);
 // Eski (kullaniciya ozel) prices tablosunu ortak yapiya tasi + fiyat
 // degisikliklerinde NOTIFY gonderecek tetikleyiciyi kur.
 const MIGRATIONS = `
+-- Eski users tablosuna yeni sutunlari ekle
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'normal';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false;
+
+-- Gecmisi olmayan kullanicilar icin mevcut parolayi gecmise tohumla
+INSERT INTO password_history (user_id, password)
+SELECT id, password FROM users u
+WHERE NOT EXISTS (SELECT 1 FROM password_history h WHERE h.user_id = u.id);
+
 DO $$
 BEGIN
   -- prices tablosunda eski user_id sutunu varsa ortak yapiya gec
