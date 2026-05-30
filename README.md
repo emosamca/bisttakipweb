@@ -28,15 +28,15 @@ Uygulama `http://localhost:3000` adresinde çalışır.
 Ayarlar `.env` dosyasındadır:
 
 ```
-DATABASE_URL=postgres://postgres:posQwertyuop73@194.5.236.175:5432/bisttakip?sslmode=prefer
+DATABASE_URL=""
 PORT=3000
 SESSION_SECRET=...        # production'da mutlaka değiştirin
-DEFAULT_USER=admin        # ilk açılışta oluşturulur
-DEFAULT_PASSWORD=admin123
+DEFAULT_USER=        # ilk açılışta oluşturulur
+DEFAULT_PASSWORD=
 ```
 
 > İlk başlatmada tablolar otomatik oluşturulur ve varsayılan kullanıcı eklenir
-> (`admin / admin123`). Giriş yaptıktan sonra `.env`'deki şifreyi değiştirip
+> (` / `). Giriş yaptıktan sonra `.env`'deki şifreyi değiştirip
 > yeni kullanıcı oluşturmanız önerilir.
 
 ## Kurulum (Docker)
