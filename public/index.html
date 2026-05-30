@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BIST Portföy Takip</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- GIRIS EKRANI -->
+  <div id="loginView" class="login-wrap hidden">
+    <form id="loginForm" class="login-card">
+      <h1>📈 BIST Portföy</h1>
+      <p class="muted">Devam etmek için giriş yapın</p>
+      <label>Kullanıcı Adı
+        <input type="text" id="loginUser" autocomplete="username" required />
+      </label>
+      <label>Şifre
+        <input type="password" id="loginPass" autocomplete="current-password" required />
+      </label>
+      <button type="submit" class="btn primary">Giriş Yap</button>
+      <div id="loginError" class="error hidden"></div>
+    </form>
+  </div>
+
+  <!-- UYGULAMA -->
+  <div id="appView" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand">📈 BIST Portföy</div>
+      <button class="btn primary block" id="openPurchase">+ Alım Ekle</button>
+      <button class="btn block" id="openCash">+ Nakit / Temettü Ekle</button>
+      <button class="btn block" id="openAdjust">⚖ Nakit Düzeltme</button>
+      <button class="btn block" id="openPrice">+ Fiyat Güncelle</button>
+      <div class="sidebar-spacer"></div>
+      <div class="user-box">
+        <span id="userName" class="muted"></span>
+        <button class="btn ghost small" id="logoutBtn">Çıkış</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <h2>Dashboard</h2>
+      <section class="cards">
+        <div class="card">
+          <div class="card-label">Nakit Bakiye</div>
+          <div class="card-value" id="cardCash">—</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Portföy Güncel Değeri</div>
+          <div class="card-value" id="cardValue">—</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Kâr / Zarar</div>
+          <div class="card-value" id="cardProfit">—</div>
+          <div class="card-sub" id="cardProfitPct"></div>
+        </div>
+        <div class="card">
+          <div class="card-label">Toplam Varlık (Nakit + Hisse)</div>
+          <div class="card-value" id="cardAssets">—</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Toplam Maliyet</div>
+          <div class="card-value" id="cardCost">—</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Toplam Temettü Geliri</div>
+          <div class="card-value" id="cardDiv">—</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>Portföy Değeri (Zaman)</h3>
+        <div id="valueChart" class="value-chart">
+          <div class="chart-empty">Yükleniyor…</div>
+        </div>
+      </section>
+
+      <div class="two-col">
+        <section class="panel">
+          <h3>Portföy Dağılımı</h3>
+          <div class="chart-wrap">
+            <div id="pieChart" class="pie"></div>
+            <div id="pieLegend" class="legend"></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h3>Hisseler</h3>
+          <div class="table-wrap">
+            <table id="holdingsTable">
+              <thead>
+                <tr>
+                  <th>Hisse</th>
+                  <th class="num">Adet</th>
+                  <th class="num">Ort. Maliyet</th>
+                  <th class="num">Güncel Fiyat</th>
+                  <th class="num">Güncel Değer</th>
+                  <th class="num">Kâr/Zarar</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div class="two-col">
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Fiyat Tablosu</h3>
+            <button class="btn small" id="openPrice2">+ Fiyat Ekle / Güncelle</button>
+          </div>
+          <div class="table-wrap">
+            <table id="pricesTable" class="compact">
+              <thead>
+                <tr>
+                  <th>Hisse</th><th class="num">Güncel Fiyat</th><th>Güncelleme</th><th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h3>Temettü İstatistikleri</h3>
+          <div id="dividendStats" class="div-stats">
+            <div class="chart-empty">Temettü kaydı yok</div>
+          </div>
+        </section>
+      </div>
+
+      <div class="two-col">
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Alım Geçmişi</h3>
+            <div class="filters">
+              <select id="filterSymbol"><option value="">Tüm Hisseler</option></select>
+              <select id="filterSource">
+                <option value="">Tüm Kaynaklar</option>
+                <option value="normal">Normal</option>
+                <option value="temettu">Temettü</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table id="purchasesTable">
+              <thead>
+                <tr>
+                  <th>Tarih</th><th>Hisse</th><th class="num">Adet</th>
+                  <th class="num">Fiyat</th><th class="num">Toplam</th>
+                  <th>Kaynak</th><th class="num">$ Kur</th><th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="pager" id="purchasesPager"></div>
+        </section>
+
+        <section class="panel">
+          <h3>Nakit / Temettü Geçmişi</h3>
+          <div class="table-wrap">
+            <table id="cashTable">
+              <thead>
+                <tr>
+                  <th>Tarih</th><th>Tür</th><th>Hisse</th>
+                  <th class="num">Miktar</th><th>Not</th><th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="pager" id="cashPager"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- ALIM EKLE / DUZENLE MODAL -->
+  <div id="purchaseModal" class="modal hidden">
+    <form class="modal-card" id="purchaseForm">
+      <input type="hidden" id="pId" />
+      <div class="modal-head">
+        <h3 id="purchaseTitle">Alım Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="pDate" lang="tr" required />
+        </label>
+        <label>Hisse Adı
+          <input type="text" id="pSymbol" placeholder="örn. THYAO" required />
+        </label>
+        <label>Hisse Adedi
+          <input type="number" id="pQty" step="any" min="0" required />
+        </label>
+        <label>Alış Fiyatı (₺)
+          <input type="number" id="pPrice" step="any" min="0" required />
+        </label>
+        <label>Alış Kaynağı
+          <select id="pSource">
+            <option value="normal" selected>Normal</option>
+            <option value="temettu">Temettü</option>
+          </select>
+        </label>
+        <label>Dolar Kuru (₺/$)
+          <input type="number" id="pUsd" step="any" min="0" placeholder="opsiyonel" />
+        </label>
+      </div>
+
+      <div class="calc-box">
+        <div><span>Toplam Tutar:</span> <strong id="pTotal">₺0,00</strong></div>
+        <div><span>Dolar Karşılığı:</span> <strong id="pUsdTotal">—</strong></div>
+      </div>
+
+      <div class="info-box" id="pBeforeInfo">Hisse ve tarih girin; bu tarihten önceki durum burada gösterilir.</div>
+
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="pError"></div>
+    </form>
+  </div>
+
+  <!-- NAKIT / TEMETTU MODAL -->
+  <div id="cashModal" class="modal hidden">
+    <form class="modal-card" id="cashForm">
+      <input type="hidden" id="cId" />
+      <div class="modal-head">
+        <h3 id="cashTitle">Nakit / Temettü Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="cDate" lang="tr" required />
+        </label>
+        <label>Miktar (₺)
+          <input type="number" id="cAmount" step="any" required />
+        </label>
+        <label class="full">Hisse (yalnızca temettü ise)
+          <input type="text" id="cSymbol" placeholder="Boş bırakılırsa nakit girişi sayılır" />
+        </label>
+        <label class="full">Not
+          <input type="text" id="cNote" placeholder="opsiyonel" />
+        </label>
+      </div>
+      <div class="info-box" id="cInfo">Hisse girilmezse <strong>nakit girişi</strong>, girilirse <strong>temettü</strong> olarak kaydedilir ve o hissenin ortalama maliyetinden düşülür.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="cError"></div>
+    </form>
+  </div>
+
+  <!-- NAKIT DUZELTME MODAL -->
+  <div id="adjustModal" class="modal hidden">
+    <form class="modal-card" id="adjustForm">
+      <div class="modal-head">
+        <h3>Nakit Düzeltme</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="aDate" lang="tr" required />
+        </label>
+        <label>Olması Gereken Bakiye (₺)
+          <input type="number" id="aTarget" step="any" required />
+        </label>
+      </div>
+      <div class="calc-box">
+        <div><span>Mevcut Bakiye:</span> <strong id="aCurrent">—</strong></div>
+        <div><span>Yapılacak Düzeltme:</span> <strong id="aDiff">—</strong></div>
+      </div>
+      <div class="info-box">Girdiğiniz değer nakit bakiyenin <strong>olması gereken</strong> tutarıdır. Sistem aradaki farkı otomatik <strong>"Nakit düzeltme"</strong> kaydı olarak ekler (banka ile eşitlemek için).</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Eşitle</button>
+      </div>
+      <div class="error hidden" id="aError"></div>
+    </form>
+  </div>
+
+  <!-- FIYAT MODAL -->
+  <div id="priceModal" class="modal hidden">
+    <form class="modal-card" id="priceForm">
+      <div class="modal-head">
+        <h3>Fiyat Ekle / Güncelle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Hisse Adı
+          <input type="text" id="prSymbol" placeholder="örn. THYAO" required />
+        </label>
+        <label>Güncel Fiyat (₺)
+          <input type="number" id="prPrice" step="any" min="0" required />
+        </label>
+      </div>
+      <div class="info-box">Aynı hisse tekrar girilirse fiyatı güncellenir.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="prError"></div>
+    </form>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
