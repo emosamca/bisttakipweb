@@ -31,6 +31,7 @@
       <button class="btn block" id="openCash">+ Nakit / Temettü Ekle</button>
       <button class="btn block" id="openAdjust">⚖ Nakit Düzeltme</button>
       <button class="btn block" id="openPrice">+ Fiyat Ekle</button>
+      <button class="btn block" id="openDividends">💰 Temettü Girişi</button>
       <button class="btn block" id="openCalc">🧮 Hesap Makinesi</button>
       <button class="btn block hidden" id="openUsers">👥 Kullanıcılar</button>
       <button class="btn block" id="openChangePw">🔑 Parola Değiştir</button>
@@ -426,6 +427,10 @@
         <label class="full">Günlük Alım Tutarı (₺)
           <input type="number" id="calcDaily" step="any" min="0" placeholder="örn. 100" required />
         </label>
+        <label class="full checkbox-row">
+          <input type="checkbox" id="calcReinvest" />
+          <span>Gelen temettü ile hisse alınsın (yoksa nakit olarak gösterilir)</span>
+        </label>
       </div>
       <div class="modal-foot">
         <button type="submit" class="btn primary">Hesapla</button>
@@ -433,6 +438,45 @@
       <div id="calcResult" class="calc-result hidden"></div>
       <div class="error hidden" id="calcError"></div>
     </form>
+  </div>
+
+  <!-- TEMETTU GIRISI MODAL -->
+  <div id="dividendsModal" class="modal hidden">
+    <div class="modal-card wide">
+      <div class="modal-head">
+        <h3>Temettü Girişi (Takvim)</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <form id="dividendForm">
+        <div class="grid2">
+          <label>Temettü Tarihi
+            <input type="date" id="dvDate" lang="tr" required />
+          </label>
+          <label>Hisse
+            <input type="text" id="dvSymbol" placeholder="örn. FROTO" required />
+          </label>
+          <label>Brüt Tutar (hisse başı ₺)
+            <input type="number" id="dvGross" step="any" min="0" required />
+          </label>
+          <label>Net Tutar (hisse başı ₺)
+            <input type="number" id="dvNet" step="any" min="0" required />
+          </label>
+        </div>
+        <div class="info-box">Net otomatik <strong>brüt × 0,85</strong> hesaplanır; istersen değiştirebilirsin. Bu kayıtlar hesap makinesinde kullanılır.</div>
+        <div class="modal-foot">
+          <button type="submit" class="btn primary">Ekle</button>
+        </div>
+        <div class="error hidden" id="dvError"></div>
+      </form>
+      <div class="table-wrap">
+        <table id="dividendsTable">
+          <thead>
+            <tr><th>Tarih</th><th>Hisse</th><th class="num">Brüt</th><th class="num">Net</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

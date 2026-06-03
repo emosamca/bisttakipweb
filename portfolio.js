@@ -217,11 +217,31 @@ async function historySymbols() {
   }
 }
 
+// Temettu takvimini listele (opsiyonel sembol filtresi)
+async function listDividends(symbol) {
+  if (symbol) {
+    const r = await db.query(
+      'SELECT * FROM dividends WHERE symbol = $1 ORDER BY pay_date DESC, id DESC',
+      [symbol.trim().toUpperCase()]
+    );
+    return r.rows;
+  }
+  const r = await db.query('SELECT * FROM dividends ORDER BY pay_date DESC, id DESC');
+  return r.rows;
+}
+
 // Duzenli alim (DCA) hesabi: start tarihinden itibaren her islem gununde
 // 'daily' TL'lik alim yapilsaydi bugun ne kadar olurdu.
-async function dca(symbol, start, daily) {
+// reinvest=true ise temettu (net) ile o gunku fiyattan hisse alinir;
+// degilse temettu nakit olarak biriktirilir.
+async function dca(symbol, start, daily, reinvest = false) {
   const sym = symbol.trim().toUpperCase();
   const startDate = start < '2025-08-01' ? '2025-08-01' : start;
+  const empty = {
+    symbol: sym, start: startDate, daily, days: 0, invested: 0, totalShares: 0,
+    lastDate: null, lastClose: 0, currentValue: 0, dividendCash: 0, dividendCount: 0,
+    reinvest, total: 0, profit: 0, profitPct: 0,
+  };
   try {
     const r = await db.query(
       `SELECT date, close FROM price_history
@@ -229,28 +249,58 @@ async function dca(symbol, start, daily) {
         ORDER BY date`,
       [sym, startDate]
     );
+    const rows = r.rows;
+    const days = rows.length;
+    if (!days) return empty;
+    const lastDate = rows[days - 1].date;
+
+    // bu sembolun, donem icindeki temettuleri (net, hisse basina)
+    const divRes = await db.query(
+      `SELECT pay_date, net FROM dividends
+        WHERE symbol = $1 AND pay_date >= $2 AND pay_date <= $3
+        ORDER BY pay_date`,
+      [sym, startDate, lastDate]
+    );
+    const divs = divRes.rows;
+
     let shares = 0;
-    for (const row of r.rows) shares += daily / Number(row.close);
-    const days = r.rows.length;
-    const invested = days * daily;
-    const lastClose = days ? Number(r.rows[days - 1].close) : 0;
-    const lastDate = days ? r.rows[days - 1].date : null;
+    let invested = 0;
+    let dividendCash = 0;
+    let dividendCount = 0;
+    let lastClose = 0;
+    let di = 0;
+    for (const row of rows) {
+      const close = Number(row.close);
+      // bugune (<=) gelen temettuleri, gunluk alimdan ONCE isle (elde tutulan adet uzerinden)
+      while (di < divs.length && divs[di].pay_date <= row.date) {
+        const netPer = Number(divs[di].net);
+        const cash = shares * netPer;
+        if (cash > 0) {
+          if (reinvest) {
+            const p = divs[di].pay_date === row.date ? close : lastClose || close;
+            if (p > 0) shares += cash / p;
+          } else {
+            dividendCash += cash;
+          }
+          dividendCount++;
+        }
+        di++;
+      }
+      shares += daily / close;
+      invested += daily;
+      lastClose = close;
+    }
     const currentValue = shares * lastClose;
+    const total = currentValue + dividendCash;
     return {
-      symbol: sym,
-      start: startDate,
-      daily,
-      days,
-      invested,
-      totalShares: shares,
-      lastDate,
-      lastClose,
-      currentValue,
-      profit: currentValue - invested,
-      profitPct: invested > 0 ? ((currentValue - invested) / invested) * 100 : 0,
+      symbol: sym, start: startDate, daily, days, invested,
+      totalShares: shares, lastDate, lastClose, currentValue,
+      dividendCash, dividendCount, reinvest, total,
+      profit: total - invested,
+      profitPct: invested > 0 ? ((total - invested) / invested) * 100 : 0,
     };
   } catch (err) {
-    if (err.code === '42P01') return { symbol: sym, days: 0, invested: 0, totalShares: 0, currentValue: 0, profit: 0, profitPct: 0, lastClose: 0, lastDate: null, start: startDate, daily };
+    if (err.code === '42P01') return empty;
     throw err;
   }
 }
@@ -283,4 +333,5 @@ module.exports = {
   priceOnDate,
   historySymbols,
   dca,
+  listDividends,
 };

@@ -209,6 +209,8 @@ tbody tr:hover { background: var(--bg-elev); }
 .calc-result .cr-row span { color: var(--muted); }
 .calc-result .cr-row strong { font-weight: 600; }
 .calc-result .cr-big { font-size: 18px; border-top: 1px solid var(--border); padding-top: 10px; margin-top: 2px; }
+.checkbox-row { flex-direction: row !important; align-items: center; gap: 8px !important; color: var(--text) !important; cursor: pointer; }
+.checkbox-row input { width: auto; }
 .info-box.has-data { border-color: var(--primary); color: var(--text); }
 
 .error { color: var(--red); font-size: 13px; }

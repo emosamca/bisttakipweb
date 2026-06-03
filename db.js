@@ -46,6 +46,17 @@ CREATE TABLE IF NOT EXISTS users (
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Temettu takvimi (hisse basina brut/net temettu; ORTAK referans veri)
+CREATE TABLE IF NOT EXISTS dividends (
+  id          SERIAL PRIMARY KEY,
+  symbol      TEXT NOT NULL,
+  pay_date    DATE NOT NULL,
+  gross       NUMERIC(18,6) NOT NULL,   -- hisse basina brut
+  net         NUMERIC(18,6) NOT NULL,   -- hisse basina net (varsayilan brut*0.825)
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_dividends_symbol ON dividends(symbol, pay_date);
+
 -- Parola gecmisi (son 3 parolayi tekrar engellemek icin)
 CREATE TABLE IF NOT EXISTS password_history (
   id          SERIAL PRIMARY KEY,

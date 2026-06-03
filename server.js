@@ -314,17 +314,60 @@ app.get('/api/history-symbols', requireAuth, async (req, res) => {
 
 // ---- Hesap makinesi: duzenli alim (DCA) hesabi ----
 app.get('/api/dca', requireAuth, async (req, res) => {
-  const { symbol, start, daily } = req.query;
+  const { symbol, start, daily, reinvest } = req.query;
   if (!symbol || !start || daily === undefined) {
     return res.status(400).json({ error: 'symbol, start ve daily gerekli' });
   }
   const d = Number(daily);
   if (!(d > 0)) return res.status(400).json({ error: 'Gunluk alim degeri pozitif olmali' });
+  const reinv = reinvest === '1' || reinvest === 'true';
   try {
-    res.json(await portfolio.dca(symbol, start, d));
+    res.json(await portfolio.dca(symbol, start, d, reinv));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Hesaplanamadi' });
+  }
+});
+
+// ---- Temettu takvimi (ORTAK referans veri) ----
+app.get('/api/dividends', requireAuth, async (req, res) => {
+  try {
+    res.json(await portfolio.listDividends(req.query.symbol));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Liste alinamadi' });
+  }
+});
+
+app.post('/api/dividends', requireAuth, async (req, res) => {
+  const { symbol, pay_date, gross, net } = req.body || {};
+  if (!symbol || !pay_date || gross === undefined || gross === null) {
+    return res.status(400).json({ error: 'Hisse, tarih ve brut tutar gerekli' });
+  }
+  const g = Number(gross);
+  if (!(g >= 0)) return res.status(400).json({ error: 'Gecerli brut tutar girin' });
+  // net verilmezse brut*0.85
+  const n = net !== undefined && net !== null && net !== '' ? Number(net) : g * 0.85;
+  if (!(n >= 0)) return res.status(400).json({ error: 'Gecerli net tutar girin' });
+  try {
+    const r = await db.query(
+      `INSERT INTO dividends (symbol, pay_date, gross, net) VALUES ($1,$2,$3,$4) RETURNING *`,
+      [symbol.trim().toUpperCase(), pay_date, g, n]
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Kaydedilemedi' });
+  }
+});
+
+app.delete('/api/dividends/:id', requireAuth, async (req, res) => {
+  try {
+    await db.query('DELETE FROM dividends WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Silinemedi' });
   }
 });
 

@@ -1103,9 +1103,10 @@ $('calcForm').addEventListener('submit', async (e) => {
     err.classList.remove('hidden');
     return;
   }
+  const reinvest = $('calcReinvest').checked ? '1' : '0';
   try {
     const r = await api(
-      `/api/dca?symbol=${encodeURIComponent(symbol)}&start=${start}&daily=${encodeURIComponent(daily)}`
+      `/api/dca?symbol=${encodeURIComponent(symbol)}&start=${start}&daily=${encodeURIComponent(daily)}&reinvest=${reinvest}`
     );
     const box = $('calcResult');
     if (!r.days) {
@@ -1114,15 +1115,100 @@ $('calcForm').addEventListener('submit', async (e) => {
       return;
     }
     const plClass = r.profit >= 0 ? 'pos' : 'neg';
-    box.innerHTML =
+    let html =
       `<div class="cr-row"><span>${r.symbol} · ${shortDate(r.start)} → ${shortDate(r.lastDate)}</span><strong>${r.days} işlem günü</strong></div>` +
       `<div class="cr-row"><span>Günlük alım</span><strong>${tl(r.daily)}</strong></div>` +
       `<div class="cr-row"><span>Toplam yatırılan</span><strong>${tl(r.invested)}</strong></div>` +
       `<div class="cr-row"><span>Biriken hisse adedi</span><strong>${num(r.totalShares)}</strong></div>` +
-      `<div class="cr-row"><span>Son kapanış (${shortDate(r.lastDate)})</span><strong>${tl(r.lastClose)}</strong></div>` +
-      `<div class="cr-row cr-big"><span>Bugünkü değer</span><strong>${tl(r.currentValue)}</strong></div>` +
-      `<div class="cr-row"><span>Kâr / Zarar</span><strong class="${plClass}">${tl(r.profit)} (%${r.profitPct.toFixed(1)})</strong></div>`;
+      `<div class="cr-row"><span>Son kapanış (${shortDate(r.lastDate)})</span><strong>${tl(r.lastClose)}</strong></div>`;
+    if (r.dividendCount > 0) {
+      html += `<div class="cr-row"><span>Uygulanan temettü</span><strong>${r.dividendCount} kez${r.reinvest ? ' · hisseye dönüştürüldü' : ''}</strong></div>`;
+    }
+    html += `<div class="cr-row cr-big"><span>Bugünkü hisse değeri</span><strong>${tl(r.currentValue)}</strong></div>`;
+    if (!r.reinvest && r.dividendCash > 0) {
+      html +=
+        `<div class="cr-row"><span>Biriken temettü (nakit)</span><strong>${tl(r.dividendCash)}</strong></div>` +
+        `<div class="cr-row cr-big"><span>Toplam (hisse + nakit)</span><strong>${tl(r.total)}</strong></div>`;
+    }
+    html += `<div class="cr-row"><span>Kâr / Zarar</span><strong class="${plClass}">${tl(r.profit)} (%${r.profitPct.toFixed(1)})</strong></div>`;
+    box.innerHTML = html;
     box.classList.remove('hidden');
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
+// ---- Temettu girisi (takvim) ----
+$('openDividends').addEventListener('click', () => {
+  $('dividendForm').reset();
+  $('dvError').classList.add('hidden');
+  $('dvDate').value = todayStr();
+  openModal('dividendsModal');
+  loadDividends();
+});
+
+// brut girilince net = brut*0.825 (kullanici net'i elle degistirmediyse)
+let dvNetManual = false;
+$('dvNet').addEventListener('input', () => { dvNetManual = true; });
+$('dvGross').addEventListener('input', () => {
+  if (!dvNetManual) {
+    const g = Number($('dvGross').value);
+    $('dvNet').value = g > 0 ? +(g * 0.85).toFixed(6) : '';
+  }
+});
+
+async function loadDividends() {
+  const tb = $('dividendsTable').querySelector('tbody');
+  try {
+    const rows = await api('/api/dividends');
+    if (!rows.length) {
+      tb.innerHTML = '<tr class="empty-row"><td colspan="5">Kayıt yok</td></tr>';
+      return;
+    }
+    tb.innerHTML = rows
+      .map(
+        (r) => `<tr>
+          <td>${r.pay_date.slice(0, 10)}</td>
+          <td><strong>${esc(r.symbol)}</strong></td>
+          <td class="num">${tl(r.gross)}</td>
+          <td class="num">${tl(r.net)}</td>
+          <td><button class="del-btn" data-del-dv="${r.id}" title="Sil">🗑</button></td>
+        </tr>`
+      )
+      .join('');
+    tb.querySelectorAll('[data-del-dv]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        if (!confirm('Bu temettü kaydı silinsin mi?')) return;
+        await api(`/api/dividends/${b.dataset.delDv}`, { method: 'DELETE' });
+        loadDividends();
+      })
+    );
+  } catch (e) {
+    tb.innerHTML = `<tr class="empty-row"><td colspan="5">${esc(e.message)}</td></tr>`;
+  }
+}
+
+$('dividendForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('dvError');
+  err.classList.add('hidden');
+  try {
+    await api('/api/dividends', {
+      method: 'POST',
+      body: JSON.stringify({
+        pay_date: $('dvDate').value,
+        symbol: $('dvSymbol').value,
+        gross: $('dvGross').value,
+        net: $('dvNet').value,
+      }),
+    });
+    // formu sifirla ama tarihi koru, net-manual bayragini sifirla
+    const keepDate = $('dvDate').value;
+    $('dividendForm').reset();
+    $('dvDate').value = keepDate;
+    dvNetManual = false;
+    loadDividends();
   } catch (e2) {
     err.textContent = e2.message;
     err.classList.remove('hidden');
