@@ -243,6 +243,39 @@ CREATE TABLE IF NOT EXISTS binance_keys (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Kullaniciya ozel Telegram bildirim ayari (chat_id yoksa mesaj gonderilmez)
+CREATE TABLE IF NOT EXISTS telegram_settings (
+  user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  chat_id     TEXT NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Kullanicinin kazandigi basarimlar (kupalar). Tanimlar kodda; burada sadece kazanim.
+CREATE TABLE IF NOT EXISTS user_achievements (
+  user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  achievement_key  TEXT NOT NULL,
+  unlocked_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, achievement_key)
+);
+
+-- Gunluk portfoy snapshot'lari (kullanici basina gunde 1 satir). Haftalik ozet ve
+-- Genel zaman grafigi icin kullanilir.
+CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  snap_date   DATE NOT NULL,
+  total_try   NUMERIC(20,4) NOT NULL DEFAULT 0,
+  bist        NUMERIC(20,4) NOT NULL DEFAULT 0,
+  us          NUMERIC(20,4) NOT NULL DEFAULT 0,
+  metal       NUMERIC(20,4) NOT NULL DEFAULT 0,
+  currency    NUMERIC(20,4) NOT NULL DEFAULT 0,
+  crypto      NUMERIC(20,4) NOT NULL DEFAULT 0,
+  cash        NUMERIC(20,4) NOT NULL DEFAULT 0,
+  binance     NUMERIC(20,4) NOT NULL DEFAULT 0,
+  usd_rate    NUMERIC(18,6),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, snap_date)
+);
+
 CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases(user_id);
 CREATE INDEX IF NOT EXISTS idx_purchases_symbol ON purchases(user_id, symbol);
 CREATE INDEX IF NOT EXISTS idx_cash_user ON cash_movements(user_id);

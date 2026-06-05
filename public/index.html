@@ -52,6 +52,7 @@
         <button class="btn primary block" id="cryptoOpenPurchase">+ Kripto Alım Ekle</button>
       </div>
       <button class="btn block hidden" id="openUsers">👥 Kullanıcılar</button>
+      <button class="btn block" id="openTelegram">🔔 Bildirim Ayarları</button>
       <button class="btn block" id="openChangePw">🔑 Parola Değiştir</button>
       <div class="sidebar-spacer"></div>
       <div class="user-box">
@@ -72,6 +73,7 @@
         <button class="tab" id="tabCurrency">💱 Döviz</button>
         <button class="tab" id="tabCrypto">🪙 Kripto</button>
         <button class="tab" id="tabBinance">🟡 Binance</button>
+        <button class="tab" id="tabAchv">🏅 Başarımlar</button>
       </div>
 
       <div id="genelDash">
@@ -124,6 +126,11 @@
           <div id="genPie" class="pie pie-lg"></div>
           <div id="genLegend" class="legend"></div>
         </div>
+      </section>
+
+      <section class="panel">
+        <h3>Toplam Bütçe (Zaman)</h3>
+        <div id="genBudgetChart" class="value-chart"><div class="chart-empty">Yükleniyor…</div></div>
       </section>
       </div><!-- /genelDash -->
 
@@ -628,6 +635,15 @@
           </div>
         </section>
       </div><!-- /binanceDash -->
+
+      <!-- ===================== BAŞARIMLAR DASHBOARD ===================== -->
+      <div id="achvDash" class="hidden">
+        <div id="achvBanner" class="achv-banner hidden"></div>
+        <section class="panel">
+          <div id="achvHeader"></div>
+        </section>
+        <div id="achvBody"></div>
+      </div><!-- /achvDash -->
     </main>
   </div>
 
@@ -1133,6 +1149,33 @@
         <button type="submit" class="btn primary">Kaydet</button>
       </div>
       <div class="error hidden" id="chError"></div>
+    </form>
+  </div>
+
+  <!-- TELEGRAM BILDIRIM AYARLARI MODAL -->
+  <div id="telegramModal" class="modal hidden">
+    <form class="modal-card" id="telegramForm">
+      <div class="modal-head">
+        <h3>Telegram Bildirim Ayarları</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <label>Telegram Chat ID
+        <input type="text" id="tgChatId" autocomplete="off" placeholder="örn. 123456789" />
+      </label>
+      <div class="info-box">
+        Her gün <strong>21:00</strong>'de portföy özeti gönderilir. Chat ID'nizi öğrenmek için Telegram'da
+        <strong>@userinfobot</strong>'a yazın; ayrıca botumuza (bir kez) mesaj atmanız gerekir.
+        Boş bırakıp kaydederseniz bildirim kapanır.
+        <span id="tgBotWarn" class="neg hidden"><br>⚠ Sunucuda bot tanımlı değil (BOT_TOKEN).</span>
+      </div>
+      <div class="modal-foot" style="flex-wrap:wrap; gap:8px">
+        <button type="button" class="btn ghost" id="tgTest">Test Mesajı</button>
+        <button type="button" class="btn" id="tgSendNow">📤 Günlük Gönder</button>
+        <button type="button" class="btn" id="tgSendWeekly">📅 Haftalık Gönder</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div id="tgMsg" class="card-sub"></div>
+      <div class="error hidden" id="tgError"></div>
     </form>
   </div>
 

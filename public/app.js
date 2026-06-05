@@ -605,6 +605,46 @@ function renderGenelPie(items, total) {
     .join('');
 }
 
+// ---- Genel: Toplam Butce zaman grafigi (gunluk snapshot'lardan) ----
+async function genelLoadChart() {
+  let series = [];
+  try {
+    series = await api('/api/snapshots');
+  } catch (_) {}
+  renderBudgetChart(series);
+}
+
+function renderBudgetChart(series) {
+  const box = $('genBudgetChart');
+  if (!series || series.length < 2) {
+    box.innerHTML = '<div class="chart-empty">Yeterli veri yok — her gün otomatik birikir (en az 2 gün gerekir).</div>';
+    return;
+  }
+  const W = 900, H = 260, pad = { l: 72, r: 16, t: 16, b: 28 };
+  const innerW = W - pad.l - pad.r, innerH = H - pad.t - pad.b;
+  const vals = series.map((s) => Number(s.total));
+  let min = Math.min(...vals), max = Math.max(...vals);
+  if (min === max) { min = min * 0.99; max = max * 1.01 || 1; }
+  const X = (i) => pad.l + (i / (series.length - 1)) * innerW;
+  const Y = (v) => pad.t + innerH - ((v - min) / (max - min)) * innerH;
+  const dline = series.map((s, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(Number(s.total)).toFixed(1)}`).join(' ');
+  const area = `${dline} L${X(series.length - 1).toFixed(1)},${(pad.t + innerH).toFixed(1)} L${X(0).toFixed(1)},${(pad.t + innerH).toFixed(1)} Z`;
+  let grid = '';
+  for (let k = 0; k <= 4; k++) {
+    const v = min + ((max - min) * k) / 4;
+    const y = Y(v);
+    grid += `<line class="grid" x1="${pad.l}" y1="${y.toFixed(1)}" x2="${W - pad.r}" y2="${y.toFixed(1)}"/>` +
+      `<text class="ytick" x="${pad.l - 6}" y="${(y + 4).toFixed(1)}">${kfmt(v)}</text>`;
+  }
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}">
+    ${grid}
+    <path d="${area}" fill="rgba(47,129,247,0.12)"/>
+    <path d="${dline}" fill="none" stroke="#2f81f7" stroke-width="2"/>
+    <text class="xtick" x="${pad.l}" y="${H - 8}" style="text-anchor:start">${shortDate(series[0].date)}</text>
+    <text class="xtick" x="${W - pad.r}" y="${H - 8}" style="text-anchor:end">${shortDate(series[series.length - 1].date)}</text>
+  </svg>`;
+}
+
 // ---- Veri yenileme ----
 async function refreshAll() {
   await Promise.all([
@@ -1356,6 +1396,7 @@ function switchDash(which) {
   const isCurrency = which === 'currency';
   const isCrypto = which === 'crypto';
   const isBinance = which === 'binance';
+  const isAchv = which === 'achv';
   $('genelDash').classList.toggle('hidden', !isGenel);
   $('bistDash').classList.toggle('hidden', !isBist);
   $('usDash').classList.toggle('hidden', !isUs);
@@ -1363,8 +1404,9 @@ function switchDash(which) {
   $('currencyDash').classList.toggle('hidden', !isCurrency);
   $('cryptoDash').classList.toggle('hidden', !isCrypto);
   $('binanceDash').classList.toggle('hidden', !isBinance);
+  $('achvDash').classList.toggle('hidden', !isAchv);
   // Her sekme kendi menusunu gosterir; Genel'de Nakit Duzenleme menusu gosterilir.
-  // Binance sekmesinde menu yoktur (yalnizca Kullanicilar + Parola Degistir).
+  // Binance ve Basarimlar sekmesinde menu yoktur (yalnizca Kullanicilar + Parola Degistir).
   $('genelMenu').classList.toggle('hidden', !isGenel);
   $('bistMenu').classList.toggle('hidden', !isBist);
   $('usMenu').classList.toggle('hidden', !isUs);
@@ -1378,11 +1420,13 @@ function switchDash(which) {
   $('tabCurrency').classList.toggle('active', isCurrency);
   $('tabCrypto').classList.toggle('active', isCrypto);
   $('tabBinance').classList.toggle('active', isBinance);
+  $('tabAchv').classList.toggle('active', isAchv);
   if (isUs) usRefreshAll();
   if (isMetal) metalRefreshAll();
   if (isCurrency) currencyRefreshAll();
   if (isCrypto) cryptoRefreshAll();
   if (isBinance) binanceLoad();
+  if (isAchv) achievementsLoad();
   if (isGenel) genelLoadSummary();
 }
 $('tabGenel').addEventListener('click', () => switchDash('genel'));
@@ -1392,6 +1436,7 @@ $('tabMetal').addEventListener('click', () => switchDash('metal'));
 $('tabCurrency').addEventListener('click', () => switchDash('currency'));
 $('tabCrypto').addEventListener('click', () => switchDash('crypto'));
 $('tabBinance').addEventListener('click', () => switchDash('binance'));
+$('tabAchv').addEventListener('click', () => switchDash('achv'));
 
 // Genel kartlarina tiklayinca ilgili sekmeye gec
 document.querySelectorAll('#genelDash .card[data-goto]').forEach((c) =>
@@ -1459,6 +1504,8 @@ async function genelLoadSummary() {
     ],
     total
   );
+
+  genelLoadChart();
 }
 function maybeRefreshGenel() {
   if (!$('genelDash').classList.contains('hidden')) genelLoadSummary();
@@ -2575,6 +2622,157 @@ $('binanceKeyForm').addEventListener('submit', async (e) => {
   }
 });
 $('bnRefresh').addEventListener('click', binanceLoadPortfolio);
+
+// ===================== TELEGRAM BILDIRIM AYARLARI =====================
+async function openTelegram() {
+  $('telegramForm').reset();
+  $('tgError').classList.add('hidden');
+  $('tgMsg').textContent = '';
+  try {
+    const t = await api('/api/telegram');
+    $('tgChatId').value = t.chatId || '';
+    $('tgBotWarn').classList.toggle('hidden', !!t.botConfigured);
+  } catch (_) {}
+  openModal('telegramModal');
+}
+$('openTelegram').addEventListener('click', openTelegram);
+
+function tgShow(msg, ok) {
+  const el = $('tgMsg');
+  el.textContent = msg;
+  el.className = 'card-sub ' + (ok ? 'pos' : 'neg');
+}
+
+$('telegramForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('tgError').classList.add('hidden');
+  $('tgMsg').textContent = '';
+  try {
+    const chatId = $('tgChatId').value.trim();
+    await api('/api/telegram', { method: 'PUT', body: JSON.stringify({ chatId }) });
+    tgShow(chatId ? 'Kaydedildi. Her gün 21:00 özet gelecek.' : 'Bildirim kapatıldı.', true);
+  } catch (e2) {
+    $('tgError').textContent = e2.message;
+    $('tgError').classList.remove('hidden');
+  }
+});
+
+$('tgTest').addEventListener('click', async () => {
+  $('tgError').classList.add('hidden');
+  tgShow('Gönderiliyor…', true);
+  try {
+    await api('/api/telegram/test', { method: 'POST', body: JSON.stringify({ chatId: $('tgChatId').value.trim() }) });
+    tgShow('Test mesajı gönderildi ✅', true);
+  } catch (e2) {
+    $('tgError').textContent = e2.message;
+    $('tgError').classList.remove('hidden');
+    $('tgMsg').textContent = '';
+  }
+});
+
+$('tgSendNow').addEventListener('click', async () => {
+  $('tgError').classList.add('hidden');
+  tgShow('Günlük özet gönderiliyor…', true);
+  try {
+    await api('/api/telegram/send-now', { method: 'POST', body: JSON.stringify({ chatId: $('tgChatId').value.trim() }) });
+    tgShow('Günlük özet gönderildi ✅', true);
+  } catch (e2) {
+    $('tgError').textContent = e2.message;
+    $('tgError').classList.remove('hidden');
+    $('tgMsg').textContent = '';
+  }
+});
+
+$('tgSendWeekly').addEventListener('click', async () => {
+  $('tgError').classList.add('hidden');
+  tgShow('Haftalık özet gönderiliyor…', true);
+  try {
+    await api('/api/telegram/send-weekly-now', { method: 'POST', body: JSON.stringify({ chatId: $('tgChatId').value.trim() }) });
+    tgShow('Haftalık özet gönderildi ✅', true);
+  } catch (e2) {
+    $('tgError').textContent = e2.message;
+    $('tgError').classList.remove('hidden');
+    $('tgMsg').textContent = '';
+  }
+});
+
+// ===================== BAŞARIMLAR =====================
+async function achievementsLoad() {
+  let d;
+  try {
+    d = await api('/api/achievements');
+  } catch (_) {
+    return;
+  }
+  renderAchievements(d);
+}
+
+function renderAchievements(d) {
+  const lvl = d.level;
+  const span = lvl.nextMin != null ? lvl.nextMin - lvl.currentMin : 0;
+  const inLvl = d.points - lvl.currentMin;
+  const pct = lvl.nextMin != null && span > 0 ? Math.min(100, (inLvl / span) * 100) : 100;
+  $('achvHeader').innerHTML = `
+    <div class="achv-level">
+      <div class="achv-level-badge">Lv.${lvl.level}</div>
+      <div class="achv-level-info">
+        <div class="achv-level-name">${esc(lvl.name)} <span class="achv-pts-total">${d.points} puan</span></div>
+        <div class="achv-level-bar"><span style="width:${pct.toFixed(0)}%"></span></div>
+        <div class="achv-level-sub">${
+          lvl.nextMin != null
+            ? `Sonraki seviye: <strong>${esc(lvl.nextName)}</strong> (${lvl.nextMin} puan)`
+            : 'Maksimum seviye 🎉'
+        } · ${d.unlockedCount}/${d.totalCount} başarım</div>
+      </div>
+    </div>`;
+
+  const banner = $('achvBanner');
+  const newlyItems = d.list.filter((x) => x.newly);
+  if (newlyItems.length) {
+    banner.innerHTML = '🎉 Yeni başarım: ' + newlyItems.map((x) => `<strong>${x.icon} ${esc(x.title)}</strong>`).join(', ');
+    banner.classList.remove('hidden');
+  } else {
+    banner.classList.add('hidden');
+  }
+
+  const cats = {};
+  d.list.forEach((a) => {
+    (cats[a.cat] = cats[a.cat] || []).push(a);
+  });
+  $('achvBody').innerHTML = Object.entries(cats)
+    .map(
+      ([cat, items]) => `
+      <section class="panel">
+        <h3>${esc(cat)} <span class="muted" style="font-weight:400">(${items.filter((i) => i.unlocked).length}/${items.length})</span></h3>
+        <div class="achv-grid">${items.map(renderAchvCard).join('')}</div>
+      </section>`
+    )
+    .join('');
+}
+
+function renderAchvCard(a) {
+  let bottom;
+  if (a.unlocked) {
+    bottom = `<div class="achv-date">✓ ${a.unlockedAt ? new Date(a.unlockedAt).toLocaleDateString('tr-TR') : 'Kazanıldı'}</div>`;
+  } else if (a.progress) {
+    const p = a.progress;
+    const cur = p.usd ? usd(p.current) : tl(p.current);
+    const tgt = p.usd ? usd(p.target) : tl(p.target);
+    bottom = `<div class="achv-progress"><span style="width:${p.pct.toFixed(0)}%"></span></div>
+      <div class="achv-prog-sub">${cur} / ${tgt} · %${p.pct.toFixed(0)}</div>`;
+  } else {
+    bottom = `<div class="achv-date locked">🔒 Kilitli</div>`;
+  }
+  const cls = a.unlocked ? `achv-card unlocked tier-${a.tier}` : 'achv-card locked';
+  return `<div class="${cls}">
+    <div class="achv-icon">${a.icon}</div>
+    <div class="achv-main">
+      <div class="achv-title">${esc(a.title)} <span class="achv-pts tier-${a.tier}">+${a.points}</span></div>
+      <div class="achv-desc">${esc(a.desc)}</div>
+      ${bottom}
+    </div>
+  </div>`;
+}
 
 // ---- Baslangic: oturum kontrolu ----
 (async () => {

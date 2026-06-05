@@ -12,6 +12,8 @@ const metalportfolio = require('./metalportfolio');
 const currencyportfolio = require('./currencyportfolio');
 const cryptoportfolio = require('./cryptoportfolio');
 const binance = require('./binance');
+const telegram = require('./telegram');
+const achievements = require('./achievements');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1402,6 +1404,383 @@ async function refreshAllBinance() {
   if (rows.length) broadcast('binance_change', { at: Date.now() });
 }
 
+// ===================== TELEGRAM bildirim =====================
+const tlFmt = (n) => new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(Number(n) || 0);
+const usdFmt = (n) => new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'USD' }).format(Number(n) || 0);
+function pctStr(profit, cost) {
+  if (profit == null || !(cost > 0)) return '';
+  const p = (profit / cost) * 100;
+  const up = p >= 0;
+  // Telegram font rengini desteklemez; renkli emoji ile yesil/kirmizi gosterilir
+  return ` ${up ? '🟢' : '🔴'} ${up ? '+' : '-'}%${Math.abs(p).toFixed(2)}`;
+}
+
+// Genel pano toplamlarini sunucu tarafinda hesapla (Telegram ozeti icin)
+async function computeGenelTotals(userId) {
+  const [b, u, m, c, cy] = await Promise.all([
+    portfolio.summary(userId),
+    usportfolio.summary(userId),
+    metalportfolio.summary(userId),
+    currencyportfolio.summary(userId),
+    cryptoportfolio.summary(userId),
+  ]);
+  const cashRow =
+    (await db.query('SELECT try_amount, eur_amount, usd_amount FROM cash_holdings WHERE user_id=$1', [userId])).rows[0] ||
+    { try_amount: 0, eur_amount: 0, usd_amount: 0 };
+  const prices = await currencyportfolio.priceMap();
+  const usdRate = prices.usd > 0 ? prices.usd : null;
+  const eurRate = prices.eur > 0 ? prices.eur : null;
+  const cashTRY = Number(cashRow.try_amount) + Number(cashRow.eur_amount) * (eurRate || 0) + Number(cashRow.usd_amount) * (usdRate || 0);
+  const bnCached = binanceCache.get(userId);
+  const binance = bnCached && bnCached.totalTRY != null ? bnCached.totalTRY : 0;
+
+  const bist = b.totalAssets != null ? b.totalAssets : 0;
+  const us = u.totalValueTRY != null ? u.totalValueTRY : 0;
+  const metal = m.totalValue != null ? m.totalValue : 0;
+  const curr = c.totalValue != null ? c.totalValue : 0;
+  const crypto = cy.totalValueTRY != null ? cy.totalValueTRY : 0;
+  const total = bist + us + metal + curr + crypto + cashTRY + binance;
+  return { b, u, m, c, cy, bist, us, metal, curr, crypto, cashTRY, binance, total, usdRate };
+}
+
+async function buildDailySummaryText(userId) {
+  const g = await computeGenelTotals(userId);
+  const d = new Date().toLocaleDateString('tr-TR');
+  const usdStr = g.usdRate ? ` (≈ ${usdFmt(g.total / g.usdRate)})` : '';
+  return [
+    `📊 <b>Portföy Özeti</b> — ${d}`,
+    '',
+    `🏦 BIST: <b>${tlFmt(g.bist)}</b>${pctStr(g.b.totalProfit, g.b.totalCostBasis)}`,
+    `🇺🇸 ABD: <b>${tlFmt(g.us)}</b>${pctStr(g.u.totalProfitUSD, g.u.totalCostUSD)}`,
+    `🥇 Maden: <b>${tlFmt(g.metal)}</b>${pctStr(g.m.totalProfit, g.m.totalCost)}`,
+    `💱 Döviz: <b>${tlFmt(g.curr)}</b>${pctStr(g.c.totalProfit, g.c.totalCost)}`,
+    `🪙 Kripto: <b>${tlFmt(g.crypto)}</b>${pctStr(g.cy.totalProfitUSD, g.cy.totalCostUSD)}`,
+    `💵 Nakit: <b>${tlFmt(g.cashTRY)}</b>`,
+    `🟡 Binance: <b>${g.binance ? tlFmt(g.binance) : '—'}</b>`,
+    '━━━━━━━━━━',
+    `💰 <b>Toplam Bütçe: ${tlFmt(g.total)}</b>${usdStr}`,
+  ].join('\n');
+}
+
+// Yerel tarih (YYYY-MM-DD) — sunucu yerel saatine gore
+function localDateStr(d = new Date()) {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+// Gunluk snapshot: TUM kullanicilar icin bugunku toplamlari kaydet (gunde 1 satir, upsert)
+async function writeDailySnapshots() {
+  let users;
+  try {
+    users = (await db.query('SELECT id FROM users')).rows;
+  } catch (_) {
+    return;
+  }
+  const today = localDateStr();
+  for (const u of users) {
+    try {
+      const g = await computeGenelTotals(u.id);
+      await db.query(
+        `INSERT INTO portfolio_snapshots
+           (user_id, snap_date, total_try, bist, us, metal, currency, crypto, cash, binance, usd_rate)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         ON CONFLICT (user_id, snap_date) DO UPDATE SET
+           total_try=EXCLUDED.total_try, bist=EXCLUDED.bist, us=EXCLUDED.us, metal=EXCLUDED.metal,
+           currency=EXCLUDED.currency, crypto=EXCLUDED.crypto, cash=EXCLUDED.cash,
+           binance=EXCLUDED.binance, usd_rate=EXCLUDED.usd_rate`,
+        [u.id, today, g.total, g.bist, g.us, g.metal, g.curr, g.crypto, g.cashTRY, g.binance, g.usdRate]
+      );
+    } catch (e) {
+      console.error('snapshot hata (user ' + u.id + '):', e.message);
+    }
+  }
+}
+
+// Haftalik kiyas referansi: 7 gun oncesi/oncesindeki en yakin; yoksa en eski snapshot
+async function getWeeklyBaseline(userId) {
+  const today = localDateStr();
+  let r = await db.query(
+    `SELECT * FROM portfolio_snapshots
+      WHERE user_id=$1 AND snap_date <= ($2::date - INTERVAL '7 days')
+      ORDER BY snap_date DESC LIMIT 1`,
+    [userId, today]
+  );
+  if (r.rows.length) return r.rows[0];
+  r = await db.query('SELECT * FROM portfolio_snapshots WHERE user_id=$1 ORDER BY snap_date ASC LIMIT 1', [userId]);
+  return r.rows[0] || null;
+}
+
+function deltaStr(cur, prev) {
+  const d = cur - Number(prev);
+  const pct = Number(prev) > 0 ? (d / Number(prev)) * 100 : null;
+  if (pct == null) return '';
+  const up = d >= 0;
+  return ` ${up ? '🟢' : '🔴'} ${up ? '+' : '-'}%${Math.abs(pct).toFixed(2)}`;
+}
+
+// Haftalik ozet metni. Yeterli gecmis yoksa null doner.
+async function buildWeeklySummaryText(userId) {
+  const base = await getWeeklyBaseline(userId);
+  if (!base) return null;
+  const today = localDateStr();
+  const days = Math.round((new Date(today) - new Date(base.snap_date)) / 86400000);
+  if (days < 1) return null; // bugunden baska veri yok
+  const g = await computeGenelTotals(userId);
+  const periodLabel = days >= 7 ? 'Bu hafta' : `Son ${days} gün`;
+  const totalDelta = g.total - Number(base.total_try);
+  const totalSign = totalDelta >= 0 ? '+' : '-';
+  return [
+    `📅 <b>Haftalık Özet</b> — ${new Date(today).toLocaleDateString('tr-TR')}`,
+    `<i>${periodLabel} (${new Date(base.snap_date).toLocaleDateString('tr-TR')} → bugün)</i>`,
+    '',
+    `🏦 BIST: <b>${tlFmt(g.bist)}</b>${deltaStr(g.bist, base.bist)}`,
+    `🇺🇸 ABD: <b>${tlFmt(g.us)}</b>${deltaStr(g.us, base.us)}`,
+    `🥇 Maden: <b>${tlFmt(g.metal)}</b>${deltaStr(g.metal, base.metal)}`,
+    `💱 Döviz: <b>${tlFmt(g.curr)}</b>${deltaStr(g.curr, base.currency)}`,
+    `🪙 Kripto: <b>${tlFmt(g.crypto)}</b>${deltaStr(g.crypto, base.crypto)}`,
+    `💵 Nakit: <b>${tlFmt(g.cashTRY)}</b>${deltaStr(g.cashTRY, base.cash)}`,
+    `🟡 Binance: <b>${g.binance ? tlFmt(g.binance) : '—'}</b>${g.binance ? deltaStr(g.binance, base.binance) : ''}`,
+    '━━━━━━━━━━',
+    `💰 <b>Toplam Bütçe: ${tlFmt(g.total)}</b>${deltaStr(g.total, base.total_try)}`,
+    `   Δ ${totalSign}${tlFmt(Math.abs(totalDelta))}`,
+  ].join('\n');
+}
+
+// Genel zaman grafigi icin snapshot serisi
+app.get('/api/snapshots', requireAuth, async (req, res) => {
+  try {
+    const r = await db.query(
+      'SELECT snap_date, total_try FROM portfolio_snapshots WHERE user_id=$1 ORDER BY snap_date ASC',
+      [req.session.userId]
+    );
+    res.json(r.rows.map((x) => ({ date: x.snap_date, total: Number(x.total_try) })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Alinamadi' });
+  }
+});
+
+// ===================== BAŞARIMLAR (achievements) =====================
+async function buildAchvContext(userId) {
+  const g = await computeGenelTotals(userId);
+  const cr = (
+    await db.query(
+      `SELECT
+         (SELECT COUNT(*) FROM purchases WHERE user_id=$1) bist,
+         (SELECT COUNT(*) FROM us_purchases WHERE user_id=$1) us,
+         (SELECT COUNT(*) FROM metal_purchases WHERE user_id=$1) metal,
+         (SELECT COUNT(*) FROM currency_purchases WHERE user_id=$1) currency,
+         (SELECT COUNT(*) FROM crypto_purchases WHERE user_id=$1) crypto,
+         (SELECT COUNT(*) FROM cash_movements WHERE user_id=$1 AND kind='dividend') bist_div,
+         (SELECT COUNT(*) FROM us_cash_movements WHERE user_id=$1 AND kind='dividend') us_div,
+         (SELECT COUNT(*) FROM binance_keys WHERE user_id=$1) binance,
+         (SELECT COUNT(*) FROM telegram_settings WHERE user_id=$1) telegram`,
+      [userId]
+    )
+  ).rows[0];
+  const yest = await db.query(
+    'SELECT total_try FROM portfolio_snapshots WHERE user_id=$1 AND snap_date < $2 ORDER BY snap_date DESC LIMIT 1',
+    [userId, localDateStr()]
+  );
+  const prev = yest.rows.length ? Number(yest.rows[0].total_try) : null;
+  const dailyChangePct = prev && prev > 0 ? ((g.total - prev) / prev) * 100 : null;
+  return {
+    totalTRY: g.total,
+    totalUSD: g.usdRate ? g.total / g.usdRate : null,
+    bistCount: Number(cr.bist),
+    usCount: Number(cr.us),
+    metalCount: Number(cr.metal),
+    currencyCount: Number(cr.currency),
+    cryptoCount: Number(cr.crypto),
+    purchaseCount: Number(cr.bist) + Number(cr.us) + Number(cr.metal) + Number(cr.currency) + Number(cr.crypto),
+    hasDividend: Number(cr.bist_div) + Number(cr.us_div) > 0,
+    hasBinance: Number(cr.binance) > 0,
+    hasTelegram: Number(cr.telegram) > 0,
+    dailyChangePct,
+  };
+}
+
+async function getAchievements(userId) {
+  const ctx = await buildAchvContext(userId);
+  const unlockedRows = (await db.query('SELECT achievement_key, unlocked_at FROM user_achievements WHERE user_id=$1', [userId])).rows;
+  const unlockedMap = new Map(unlockedRows.map((r) => [r.achievement_key, r.unlocked_at]));
+  const newly = [];
+  for (const def of achievements.DEFS) {
+    if (def.check(ctx) && !unlockedMap.has(def.key)) {
+      await db.query('INSERT INTO user_achievements (user_id, achievement_key) VALUES ($1,$2) ON CONFLICT DO NOTHING', [userId, def.key]);
+      unlockedMap.set(def.key, new Date().toISOString());
+      newly.push(def.key);
+    }
+  }
+  let points = 0;
+  const list = achievements.DEFS.map((def) => {
+    const unlocked = unlockedMap.has(def.key);
+    if (unlocked) points += def.points;
+    let progress = null;
+    if (def.progress) {
+      const p = def.progress(ctx);
+      progress = { current: p.current, target: p.target, usd: !!p.usd, pct: Math.max(0, Math.min(100, p.target > 0 ? (p.current / p.target) * 100 : 0)) };
+    }
+    return {
+      key: def.key, cat: def.cat, title: def.title, desc: def.desc, icon: def.icon,
+      tier: def.tier, points: def.points, unlocked,
+      unlockedAt: unlocked ? unlockedMap.get(def.key) : null,
+      progress, newly: newly.includes(def.key),
+    };
+  });
+  return {
+    list,
+    points,
+    totalPointsPossible: achievements.TOTAL_POINTS,
+    unlockedCount: list.filter((x) => x.unlocked).length,
+    totalCount: achievements.DEFS.length,
+    level: achievements.levelFor(points),
+  };
+}
+
+app.get('/api/achievements', requireAuth, async (req, res) => {
+  try {
+    res.json(await getAchievements(req.session.userId));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Alinamadi' });
+  }
+});
+
+app.get('/api/telegram', requireAuth, async (req, res) => {
+  try {
+    const r = await db.query('SELECT chat_id FROM telegram_settings WHERE user_id=$1', [req.session.userId]);
+    res.json({ chatId: (r.rows[0] && r.rows[0].chat_id) || '', botConfigured: telegram.configured() });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Alinamadi' });
+  }
+});
+
+app.put('/api/telegram', requireAuth, async (req, res) => {
+  const chatId = ((req.body && req.body.chatId) || '').trim();
+  try {
+    if (!chatId) {
+      await db.query('DELETE FROM telegram_settings WHERE user_id=$1', [req.session.userId]);
+      return res.json({ ok: true, removed: true });
+    }
+    await db.query(
+      `INSERT INTO telegram_settings (user_id, chat_id, updated_at) VALUES ($1,$2, now())
+       ON CONFLICT (user_id) DO UPDATE SET chat_id=EXCLUDED.chat_id, updated_at=now()`,
+      [req.session.userId, chatId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Kaydedilemedi' });
+  }
+});
+
+app.post('/api/telegram/test', requireAuth, async (req, res) => {
+  const chatId = ((req.body && req.body.chatId) || '').trim();
+  if (!chatId) return res.status(400).json({ error: 'chat_id gerekli' });
+  if (!telegram.configured()) return res.status(400).json({ error: 'Sunucuda BOT_TOKEN tanımlı değil' });
+  const r = await telegram.send(chatId, '✅ <b>Test mesajı</b>\nPortföy Takip bildirimleri çalışıyor. Her gün 21:00 özet gelecek.');
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json({ ok: true });
+});
+
+// Kullanici isterse o anda portfoy ozetini gonder
+app.post('/api/telegram/send-now', requireAuth, async (req, res) => {
+  if (!telegram.configured()) return res.status(400).json({ error: 'Sunucuda BOT_TOKEN tanımlı değil' });
+  // istekte chat_id verilmemisse kayitliyi kullan
+  let chatId = ((req.body && req.body.chatId) || '').trim();
+  if (!chatId) {
+    const row = (await db.query('SELECT chat_id FROM telegram_settings WHERE user_id=$1', [req.session.userId])).rows[0];
+    chatId = row && row.chat_id ? row.chat_id : '';
+  }
+  if (!chatId) return res.status(400).json({ error: 'Önce chat_id girin' });
+  try {
+    const text = await buildDailySummaryText(req.session.userId);
+    const r = await telegram.send(chatId, text);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Özet gönderilemedi' });
+  }
+});
+
+// Kullanici isterse o anda haftalik ozeti gonder (yeterli gecmis yoksa uyarir)
+app.post('/api/telegram/send-weekly-now', requireAuth, async (req, res) => {
+  if (!telegram.configured()) return res.status(400).json({ error: 'Sunucuda BOT_TOKEN tanımlı değil' });
+  let chatId = ((req.body && req.body.chatId) || '').trim();
+  if (!chatId) {
+    const row = (await db.query('SELECT chat_id FROM telegram_settings WHERE user_id=$1', [req.session.userId])).rows[0];
+    chatId = row && row.chat_id ? row.chat_id : '';
+  }
+  if (!chatId) return res.status(400).json({ error: 'Önce chat_id girin' });
+  try {
+    const text = await buildWeeklySummaryText(req.session.userId);
+    if (!text) return res.status(400).json({ error: 'Haftalık kıyas için yeterli geçmiş yok (en az 1 günlük snapshot gerekir; her gün birikir).' });
+    const r = await telegram.send(chatId, text);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Özet gönderilemedi' });
+  }
+});
+
+// Gunluk ozet zamanlayicisi (DAILY_SUMMARY_HOUR; varsayilan 21:00 sunucu yerel saati)
+const SUMMARY_HOUR = Number(process.env.DAILY_SUMMARY_HOUR || 21);
+// Haftalik ozet gunu (0=Pazar ... 6=Cumartesi); varsayilan 1 = Pazartesi
+const WEEKLY_DAY = Number(process.env.WEEKLY_SUMMARY_DAY || 1);
+
+async function sendDailySummaries() {
+  if (!telegram.configured()) return;
+  let rows;
+  try {
+    rows = (await db.query('SELECT user_id, chat_id FROM telegram_settings')).rows;
+  } catch (_) {
+    return;
+  }
+  for (const row of rows) {
+    if (!row.chat_id) continue; // chat_id yoksa gonderme
+    try {
+      const text = await buildDailySummaryText(row.user_id);
+      await telegram.send(row.chat_id, text);
+    } catch (e) {
+      console.error('Telegram gunluk ozet hatasi:', e.message);
+    }
+  }
+}
+
+async function sendWeeklySummaries() {
+  if (!telegram.configured()) return;
+  let rows;
+  try {
+    rows = (await db.query('SELECT user_id, chat_id FROM telegram_settings')).rows;
+  } catch (_) {
+    return;
+  }
+  for (const row of rows) {
+    if (!row.chat_id) continue;
+    try {
+      const text = await buildWeeklySummaryText(row.user_id);
+      if (text) await telegram.send(row.chat_id, text);
+    } catch (e) {
+      console.error('Telegram haftalik ozet hatasi:', e.message);
+    }
+  }
+}
+
+let lastDailySent = null;
+async function dailyTick() {
+  const now = new Date();
+  if (now.getHours() !== SUMMARY_HOUR) return;
+  const today = localDateStr(now);
+  if (lastDailySent === today) return; // gunde bir kez
+  lastDailySent = today;
+  await writeDailySnapshots(); // once tum kullanicilarin snapshot'i (gunluk birikim)
+  await sendDailySummaries(); // chat_id'si olanlara gunluk ozet
+  if (now.getDay() === WEEKLY_DAY) await sendWeeklySummaries(); // haftalik ozet gunu
+}
+
 // ---- Statik dosyalar ----
 // no-cache: tarayici her seferinde dogrulasin (eski app.js/styles.css takilmasin)
 app.use(
@@ -1464,6 +1843,12 @@ async function ensureDefaultUser() {
     // Binance toplamlarini 5 dakikada bir yenile (sunucu tarafi; secret burada kalir)
     setTimeout(refreshAllBinance, 10000); // baslangictan 10 sn sonra ilk cekim
     setInterval(refreshAllBinance, 5 * 60 * 1000);
+    // Gunluk Telegram ozeti + snapshot: her dakika kontrol, saat gelince gunde bir kez
+    setInterval(dailyTick, 60 * 1000);
+    // Baslangicta bir kez snapshot al (grafik/haftalik icin bugunku veri hazir olsun)
+    setTimeout(() => writeDailySnapshots().catch(() => {}), 20000);
+    const gunler = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+    console.log(`Telegram bot ${telegram.configured() ? 'aktif' : 'KAPALI (BOT_TOKEN yok)'}; gunluk ozet ${SUMMARY_HOUR}:00, haftalik ozet ${gunler[WEEKLY_DAY]} ${SUMMARY_HOUR}:00`);
     app.listen(PORT, () => console.log(`Sunucu calisiyor: http://localhost:${PORT}`));
   } catch (err) {
     console.error('Baslangic hatasi:', err);
