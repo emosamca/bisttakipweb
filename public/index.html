@@ -26,13 +26,31 @@
   <!-- UYGULAMA -->
   <div id="appView" class="app hidden">
     <aside class="sidebar">
-      <div class="brand">📈 BIST Portföy</div>
-      <button class="btn primary block" id="openPurchase">+ Alım Ekle</button>
-      <button class="btn block" id="openCash">+ Nakit / Temettü Ekle</button>
-      <button class="btn block" id="openAdjust">⚖ Nakit Düzeltme</button>
-      <button class="btn block" id="openPrice">+ Fiyat Ekle</button>
-      <button class="btn block" id="openDividends">💰 Temettü Girişi</button>
-      <button class="btn block" id="openCalc">🧮 Hesap Makinesi</button>
+      <div class="brand">📈 Portföy Takip</div>
+      <div id="genelMenu" class="hidden">
+        <button class="btn primary block" id="openCashHoldings">💵 Nakit Düzenleme</button>
+      </div>
+      <div id="bistMenu">
+        <button class="btn primary block" id="openPurchase">+ Alım Ekle</button>
+        <button class="btn block" id="openCash">+ Nakit / Temettü Ekle</button>
+        <button class="btn block" id="openAdjust">⚖ Nakit Düzeltme</button>
+        <button class="btn block" id="openPrice">+ Fiyat Ekle</button>
+        <button class="btn block" id="openDividends">💰 Temettü Girişi</button>
+        <button class="btn block" id="openCalc">🧮 Hesap Makinesi</button>
+      </div>
+      <div id="usMenu" class="hidden">
+        <button class="btn primary block" id="usOpenPurchase">+ ABD Alım Ekle</button>
+        <button class="btn block" id="usOpenCash">+ ABD Nakit / Temettü Ekle</button>
+      </div>
+      <div id="metalMenu" class="hidden">
+        <button class="btn primary block" id="metalOpenPurchase">+ Kıymetli Maden Alım Ekle</button>
+      </div>
+      <div id="currencyMenu" class="hidden">
+        <button class="btn primary block" id="currencyOpenPurchase">+ Döviz Alım Ekle</button>
+      </div>
+      <div id="cryptoMenu" class="hidden">
+        <button class="btn primary block" id="cryptoOpenPurchase">+ Kripto Alım Ekle</button>
+      </div>
       <button class="btn block hidden" id="openUsers">👥 Kullanıcılar</button>
       <button class="btn block" id="openChangePw">🔑 Parola Değiştir</button>
       <div class="sidebar-spacer"></div>
@@ -46,7 +64,70 @@
     </aside>
 
     <main class="content">
-      <h2>Dashboard</h2>
+      <div class="dash-tabs">
+        <button class="tab active" id="tabGenel">🌐 Genel</button>
+        <button class="tab" id="tabBist">📊 BIST Dashboard</button>
+        <button class="tab" id="tabUs">🇺🇸 ABD Dashboard</button>
+        <button class="tab" id="tabMetal">🥇 Kıymetli Maden</button>
+        <button class="tab" id="tabCurrency">💱 Döviz</button>
+        <button class="tab" id="tabCrypto">🪙 Kripto</button>
+        <button class="tab" id="tabBinance">🟡 Binance</button>
+      </div>
+
+      <div id="genelDash">
+      <section class="cards">
+        <div class="card clickable" data-goto="bist" title="BIST Dashboard'a git">
+          <div class="card-label">BIST Toplam Varlık (Nakit + Hisse)</div>
+          <div class="card-value" id="genBist">—</div>
+          <div class="card-sub" id="genBistPct"></div>
+        </div>
+        <div class="card clickable" data-goto="us" title="ABD Dashboard'a git">
+          <div class="card-label">ABD Güncel Değer (TL)</div>
+          <div class="card-value" id="genUs">—</div>
+          <div class="card-sub" id="genUsPct"></div>
+        </div>
+        <div class="card clickable" data-goto="metal" title="Kıymetli Maden'e git">
+          <div class="card-label">Kıymetli Maden Değeri (TL)</div>
+          <div class="card-value" id="genMetal">—</div>
+          <div class="card-sub" id="genMetalPct"></div>
+        </div>
+        <div class="card clickable" data-goto="currency" title="Döviz'e git">
+          <div class="card-label">Döviz Değeri (TL)</div>
+          <div class="card-value" id="genCurrency">—</div>
+          <div class="card-sub" id="genCurrencyPct"></div>
+        </div>
+        <div class="card clickable" data-goto="crypto" title="Kripto'ya git">
+          <div class="card-label">Kripto Değeri (TL)</div>
+          <div class="card-value" id="genCrypto">—</div>
+          <div class="card-sub" id="genCryptoPct"></div>
+        </div>
+        <div class="card clickable" id="genCashCard" title="Nakit Düzenleme">
+          <div class="card-label">Nakit (TL Karşılığı)</div>
+          <div class="card-value" id="genCash">—</div>
+        </div>
+        <div class="card clickable" data-goto="binance" title="Binance'e git">
+          <div class="card-label">Binance (Canlı TL)</div>
+          <div class="card-value" id="genBinance">—</div>
+          <div class="card-sub" id="genBinanceAt"></div>
+        </div>
+        <div class="card highlight">
+          <div class="card-label">Toplam Bütçe</div>
+          <div class="card-value" id="genTotal">—</div>
+          <div class="card-sub" id="genTotalUsd"></div>
+          <div class="card-sub" id="genTotalPct"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>Varlık Dağılımı</h3>
+        <div class="chart-wrap">
+          <div id="genPie" class="pie pie-lg"></div>
+          <div id="genLegend" class="legend"></div>
+        </div>
+      </section>
+      </div><!-- /genelDash -->
+
+      <div id="bistDash" class="hidden">
       <section class="cards">
         <div class="card">
           <div class="card-label">Nakit Bakiye</div>
@@ -186,6 +267,367 @@
           <div class="pager" id="cashPager"></div>
         </section>
       </div>
+      </div><!-- /bistDash -->
+
+      <!-- ===================== ABD DASHBOARD ===================== -->
+      <div id="usDash" class="hidden">
+        <section class="cards">
+          <div class="card">
+            <div class="card-label">Güncel USD/TRY</div>
+            <div class="card-value" id="usCardRate">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Toplam Maliyet (USD)</div>
+            <div class="card-value" id="usCardCostUsd">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Toplam Maliyet (TL)</div>
+            <div class="card-value" id="usCardCostTry">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Güncel Değer (USD)</div>
+            <div class="card-value" id="usCardValueUsd">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Güncel Değer (TL)</div>
+            <div class="card-value" id="usCardValueTry">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Kâr / Zarar (USD)</div>
+            <div class="card-value" id="usCardProfit">—</div>
+            <div class="card-sub" id="usCardProfitPct"></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Toplam Temettü (USD)</div>
+            <div class="card-value" id="usCardDiv">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Ödenen Komisyon (USD)</div>
+            <div class="card-value" id="usCardCommission">—</div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h3>ABD Hisseler</h3>
+          <div class="table-wrap">
+            <table id="usHoldingsTable">
+              <thead>
+                <tr>
+                  <th>Hisse</th><th class="num">Adet</th>
+                  <th class="num">Ort. Mly. ($)</th><th class="num">Güncel ($)</th>
+                  <th class="num">Maliyet ($)</th><th class="num">Maliyet (₺)</th>
+                  <th class="num">Değer ($)</th><th class="num">Değer (₺)</th>
+                  <th class="num">K/Z ($)</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div class="two-col">
+          <section class="panel">
+            <h3>ABD Fiyat Tablosu</h3>
+            <div class="table-wrap">
+              <table id="usPricesTable" class="compact">
+                <thead><tr><th>Hisse</th><th class="num">Fiyat ($)</th><th>Güncelleme</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="panel">
+            <h3>ABD Nakit / Temettü Geçmişi</h3>
+            <div class="table-wrap">
+              <table id="usCashTable">
+                <thead>
+                  <tr><th>Tarih</th><th>Tür</th><th>Hisse</th><th class="num">Tutar ($)</th><th>Not</th><th></th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="pager" id="usCashPager"></div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <h3>ABD Alım Geçmişi</h3>
+          <div class="table-wrap">
+            <table id="usPurchasesTable">
+              <thead>
+                <tr>
+                  <th>Tarih</th><th>Hisse</th><th class="num">Adet</th>
+                  <th class="num">Fiyat ($)</th><th class="num">Toplam ($)</th>
+                  <th class="num">USD/TRY</th><th class="num">Maliyet (₺)</th>
+                  <th>Kaynak</th><th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="pager" id="usPurchasesPager"></div>
+        </section>
+      </div><!-- /usDash -->
+
+      <!-- ===================== KIYMETLI MADEN DASHBOARD ===================== -->
+      <div id="metalDash" class="hidden">
+        <section class="cards">
+          <div class="card">
+            <div class="card-label">Toplam Maliyet (₺)</div>
+            <div class="card-value" id="mCardCost">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Güncel Değer (₺)</div>
+            <div class="card-value" id="mCardValue">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Kâr / Zarar (₺)</div>
+            <div class="card-value" id="mCardProfit">—</div>
+            <div class="card-sub" id="mCardProfitPct"></div>
+          </div>
+        </section>
+
+        <div class="two-col">
+          <section class="panel">
+            <h3>Kıymetli Madenler</h3>
+            <div class="table-wrap">
+              <table id="metalHoldingsTable">
+                <thead>
+                  <tr>
+                    <th>Maden</th><th class="num">Gram</th>
+                    <th class="num">Ort. Maliyet (₺/gr)</th><th class="num">Güncel (₺/gr)</th>
+                    <th class="num">Maliyet (₺)</th><th class="num">Değer (₺)</th>
+                    <th class="num">K/Z (₺)</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="panel">
+            <h3>Güncel Gram Fiyatları</h3>
+            <div class="table-wrap">
+              <table id="metalPricesTable" class="compact">
+                <thead><tr><th>Maden</th><th class="num">Gram Fiyatı (₺)</th><th>Güncelleme</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <h3>Kıymetli Maden Alım Geçmişi</h3>
+          <div class="table-wrap">
+            <table id="metalPurchasesTable">
+              <thead>
+                <tr>
+                  <th>Tarih</th><th>Maden</th><th class="num">Gram</th>
+                  <th class="num">Alış (₺/gr)</th><th class="num">Toplam (₺)</th><th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="pager" id="metalPurchasesPager"></div>
+        </section>
+      </div><!-- /metalDash -->
+
+      <!-- ===================== DOVIZ DASHBOARD ===================== -->
+      <div id="currencyDash" class="hidden">
+        <section class="cards">
+          <div class="card">
+            <div class="card-label">Toplam Maliyet (₺)</div>
+            <div class="card-value" id="cCardCost">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Güncel Değer (₺)</div>
+            <div class="card-value" id="cCardValue">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Kâr / Zarar (₺)</div>
+            <div class="card-value" id="cCardProfit">—</div>
+            <div class="card-sub" id="cCardProfitPct"></div>
+          </div>
+        </section>
+
+        <div class="two-col">
+          <section class="panel">
+            <h3>Dövizler</h3>
+            <div class="table-wrap">
+              <table id="currencyHoldingsTable">
+                <thead>
+                  <tr>
+                    <th>Döviz</th><th class="num">Adet</th>
+                    <th class="num">Ort. Maliyet (₺)</th><th class="num">Güncel Kur (₺)</th>
+                    <th class="num">Maliyet (₺)</th><th class="num">Değer (₺)</th>
+                    <th class="num">K/Z (₺)</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="panel">
+            <h3>Güncel Kurlar</h3>
+            <div class="table-wrap">
+              <table id="currencyPricesTable" class="compact">
+                <thead><tr><th>Döviz</th><th class="num">Kur (₺)</th><th>Güncelleme</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <h3>Döviz Alım Geçmişi</h3>
+          <div class="table-wrap">
+            <table id="currencyPurchasesTable">
+              <thead>
+                <tr>
+                  <th>Tarih</th><th>Döviz</th><th class="num">Adet</th>
+                  <th class="num">Alış Kuru (₺)</th><th class="num">Toplam (₺)</th><th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="pager" id="currencyPurchasesPager"></div>
+        </section>
+      </div><!-- /currencyDash -->
+
+      <!-- ===================== KRIPTO DASHBOARD ===================== -->
+      <div id="cryptoDash" class="hidden">
+        <section class="cards">
+          <div class="card">
+            <div class="card-label">Güncel USD/TRY</div>
+            <div class="card-value" id="cyCardRate">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Toplam Maliyet ($)</div>
+            <div class="card-value" id="cyCardCostUsd">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Güncel Değer ($)</div>
+            <div class="card-value" id="cyCardValueUsd">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Güncel Değer (₺)</div>
+            <div class="card-value" id="cyCardValueTry">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Kâr / Zarar ($)</div>
+            <div class="card-value" id="cyCardProfit">—</div>
+            <div class="card-sub" id="cyCardProfitPct"></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Kâr / Zarar (₺)</div>
+            <div class="card-value" id="cyCardProfitTry">—</div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h3>Kripto Varlıklar</h3>
+          <div class="table-wrap">
+            <table id="cryptoHoldingsTable">
+              <thead>
+                <tr>
+                  <th>Coin</th><th class="num">Adet</th>
+                  <th class="num">Ort. Mly. ($)</th>
+                  <th class="num">Güncel ($)</th><th class="num">Güncel (₺)</th>
+                  <th class="num">Değer ($)</th><th class="num">Değer (₺)</th>
+                  <th class="num">K/Z ($)</th><th class="num">K/Z (₺)</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div class="two-col">
+          <section class="panel">
+            <h3>Güncel Fiyatlar</h3>
+            <div class="table-wrap">
+              <table id="cryptoPricesTable" class="compact">
+                <thead><tr><th>Coin</th><th class="num">Fiyat ($)</th><th class="num">Fiyat (₺)</th><th>Güncelleme</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="panel">
+            <h3>Bilgi</h3>
+            <div class="info-box">Coin fiyatları Binance'den (USDT) çekilir. TL karşılığı güncel USD/TRY ile hesaplanır. Kâr/zarar dolar bazlıdır, TL olarak da gösterilir.</div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <h3>Kripto Alım Geçmişi</h3>
+          <div class="table-wrap">
+            <table id="cryptoPurchasesTable">
+              <thead>
+                <tr>
+                  <th>Tarih</th><th>Coin</th><th class="num">Adet</th>
+                  <th class="num">Alış ($)</th><th class="num">Toplam ($)</th><th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="pager" id="cryptoPurchasesPager"></div>
+        </section>
+      </div><!-- /cryptoDash -->
+
+      <!-- ===================== BINANCE DASHBOARD ===================== -->
+      <div id="binanceDash" class="hidden">
+        <section class="panel">
+          <h3>Binance API Anahtarı</h3>
+          <form id="binanceKeyForm">
+            <div class="grid2">
+              <label class="full">API Key
+                <input type="text" id="bnApiKey" autocomplete="off" placeholder="API key girin" />
+              </label>
+              <label class="full">API Secret
+                <input type="text" id="bnApiSecret" autocomplete="off" placeholder="API secret girin" />
+              </label>
+            </div>
+            <div class="info-box">Yalnızca <strong>read-only</strong> (okuma izinli) anahtar kullanın. Secret sunucuda şifreli saklanır, tarayıcıya gönderilmez. Kayıtlı anahtar ilk 5 ve son 5 karakter dışında maskelenir; değiştirmek için yenisini yazın.</div>
+            <div class="modal-foot" style="justify-content:flex-start">
+              <button type="submit" class="btn primary">Kaydet</button>
+              <span id="bnKeyStatus" class="muted"></span>
+            </div>
+            <div class="error hidden" id="bnKeyError"></div>
+          </form>
+        </section>
+
+        <section class="cards">
+          <div class="card">
+            <div class="card-label">Toplam Değer (USDT)</div>
+            <div class="card-value" id="bnTotalUsdt">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Toplam Değer (₺)</div>
+            <div class="card-value" id="bnTotalTry">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Toplam (BTC)</div>
+            <div class="card-value" id="bnTotalBtc">—</div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Portföy (Spot Varlıklar)</h3>
+            <button class="btn small" id="bnRefresh">↻ Yenile</button>
+          </div>
+          <div class="info-box">Liste <strong>Spot</strong> varlıklarını gösterir. Üstteki toplam <strong>tüm cüzdanları</strong> (Earn, Futures, Funding…) kapsar; bu yüzden liste toplamı üstteki toplamdan küçük olabilir. Alpha varlıkları Binance API'sinde bulunmaz.</div>
+          <div class="table-wrap">
+            <table id="binanceTable">
+              <thead>
+                <tr><th>Varlık</th><th class="num">Adet</th><th class="num">Değer (USDT)</th><th class="num">Değer (₺)</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </div><!-- /binanceDash -->
     </main>
   </div>
 
@@ -477,6 +919,221 @@
         </table>
       </div>
     </div>
+  </div>
+
+  <!-- ABD ALIM EKLE / DUZENLE MODAL -->
+  <div id="usPurchaseModal" class="modal hidden">
+    <form class="modal-card" id="usPurchaseForm">
+      <input type="hidden" id="usPId" />
+      <div class="modal-head">
+        <h3 id="usPurchaseTitle">ABD Alım Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="usPDate" lang="tr" required />
+        </label>
+        <label>Hisse Adı
+          <input type="text" id="usPSymbol" placeholder="örn. WNTR" required />
+        </label>
+        <label>Hisse Adedi
+          <input type="number" id="usPQty" step="any" min="0" required />
+        </label>
+        <label>Alış Fiyatı ($)
+          <input type="number" id="usPPrice" step="any" min="0" required />
+        </label>
+        <label>Alış Kaynağı
+          <select id="usPSource">
+            <option value="normal" selected>Normal</option>
+            <option value="temettu">Temettü</option>
+          </select>
+        </label>
+        <label>USD/TRY Kuru
+          <input type="number" id="usPUsdtry" step="any" min="0" placeholder="otomatik" />
+        </label>
+        <label>Komisyon ($)
+          <input type="number" id="usPCommission" step="any" min="0" placeholder="örn. 1.5" />
+        </label>
+      </div>
+      <div class="calc-box calc-box-grid">
+        <div><span>Ara Toplam:</span> <strong id="usPSubtotal">$0.00</strong></div>
+        <div><span>Komisyon:</span> <strong id="usPFees">$0.00</strong></div>
+        <div><span>Toplam ($):</span> <strong id="usPTotal">$0.00</strong></div>
+        <div><span>TL Karşılığı:</span> <strong id="usPTotalTry">—</strong></div>
+      </div>
+      <div class="info-box" id="usPBeforeInfo">Hisse ve tarih girin; bu tarihten önceki durum burada gösterilir.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="usPError"></div>
+    </form>
+  </div>
+
+  <!-- ABD NAKIT / TEMETTU MODAL -->
+  <div id="usCashModal" class="modal hidden">
+    <form class="modal-card" id="usCashForm">
+      <input type="hidden" id="usCId" />
+      <div class="modal-head">
+        <h3 id="usCashTitle">ABD Nakit / Temettü Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="usCDate" lang="tr" required />
+        </label>
+        <label>Tutar ($)
+          <input type="number" id="usCAmount" step="any" required />
+        </label>
+        <label class="full">Hisse (yalnızca temettü ise)
+          <input type="text" id="usCSymbol" placeholder="Boş bırakılırsa nakit girişi sayılır" />
+        </label>
+        <label class="full">Not
+          <input type="text" id="usCNote" placeholder="opsiyonel" />
+        </label>
+      </div>
+      <div class="info-box">Temettü için hisse girin; o hissenin maliyetinden (USD) düşülür. Bu dashboard'da nakit bakiye gösterilmez.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="usCError"></div>
+    </form>
+  </div>
+
+  <!-- KIYMETLI MADEN ALIM EKLE / DUZENLE MODAL -->
+  <div id="metalPurchaseModal" class="modal hidden">
+    <form class="modal-card" id="metalPurchaseForm">
+      <input type="hidden" id="mPId" />
+      <div class="modal-head">
+        <h3 id="metalPurchaseTitle">Kıymetli Maden Alım Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="mPDate" lang="tr" required />
+        </label>
+        <label>Maden
+          <select id="mPMetal">
+            <option value="gold" selected>Altın</option>
+            <option value="silver">Gümüş</option>
+          </select>
+        </label>
+        <label>Gram
+          <input type="number" id="mPQty" step="any" min="0" required />
+        </label>
+        <label>Alış Fiyatı (₺/gram)
+          <input type="number" id="mPPrice" step="any" min="0" required />
+        </label>
+      </div>
+      <div class="calc-box">
+        <div><span>Toplam Maliyet:</span> <strong id="mPTotal">₺0,00</strong></div>
+      </div>
+      <div class="info-box" id="mPBeforeInfo">Maden ve tarih girin; bu tarihten önceki durum burada gösterilir.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="mPError"></div>
+    </form>
+  </div>
+
+  <!-- DOVIZ ALIM EKLE / DUZENLE MODAL -->
+  <div id="currencyPurchaseModal" class="modal hidden">
+    <form class="modal-card" id="currencyPurchaseForm">
+      <input type="hidden" id="cPId" />
+      <div class="modal-head">
+        <h3 id="currencyPurchaseTitle">Döviz Alım Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="cPDate" lang="tr" required />
+        </label>
+        <label>Döviz
+          <select id="cPCurrency">
+            <option value="usd" selected>Dolar</option>
+            <option value="eur">Euro</option>
+          </select>
+        </label>
+        <label>Adet
+          <input type="number" id="cPQty" step="any" min="0" required />
+        </label>
+        <label>Alış Kuru (₺)
+          <input type="number" id="cPPrice" step="any" min="0" required />
+        </label>
+      </div>
+      <div class="calc-box">
+        <div><span>Toplam Maliyet:</span> <strong id="cPTotal">₺0,00</strong></div>
+      </div>
+      <div class="info-box" id="cPBeforeInfo">Döviz ve tarih girin; bu tarihten önceki durum burada gösterilir.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="cPError"></div>
+    </form>
+  </div>
+
+  <!-- KRIPTO ALIM EKLE / DUZENLE MODAL -->
+  <div id="cryptoPurchaseModal" class="modal hidden">
+    <form class="modal-card" id="cryptoPurchaseForm">
+      <input type="hidden" id="cyPId" />
+      <div class="modal-head">
+        <h3 id="cryptoPurchaseTitle">Kripto Alım Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="cyPDate" lang="tr" required />
+        </label>
+        <label>Coin
+          <input type="text" id="cyPSymbol" placeholder="örn. ADA" required />
+        </label>
+        <label>Adet
+          <input type="number" id="cyPQty" step="any" min="0" required />
+        </label>
+        <label>Alış Fiyatı ($)
+          <input type="number" id="cyPPrice" step="any" min="0" required />
+        </label>
+      </div>
+      <div class="calc-box">
+        <div><span>Toplam Maliyet:</span> <strong id="cyPTotal">$0.00</strong></div>
+      </div>
+      <div class="info-box" id="cyPBeforeInfo">Coin ve tarih girin; bu tarihten önceki durum burada gösterilir. Kaydederken coin'in Binance'de olup olmadığı kontrol edilir.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="cyPError"></div>
+    </form>
+  </div>
+
+  <!-- NAKIT DUZENLEME MODAL (Genel) -->
+  <div id="cashHoldingsModal" class="modal hidden">
+    <form class="modal-card" id="cashHoldingsForm">
+      <div class="modal-head">
+        <h3>Nakit Düzenleme</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Nakit TL (₺)
+          <input type="number" id="chTry" step="any" min="0" placeholder="0" />
+        </label>
+        <label>Nakit Euro (€)
+          <input type="number" id="chEur" step="any" min="0" placeholder="0" />
+        </label>
+        <label>Nakit Dolar ($)
+          <input type="number" id="chUsd" step="any" min="0" placeholder="0" />
+        </label>
+      </div>
+      <div class="info-box">Elinizdeki nakit tutarları girin. Euro ve Dolar, güncel kurlarla TL'ye çevrilip Genel panodaki <strong>Toplam Bütçe</strong>ye eklenir.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="chError"></div>
+    </form>
   </div>
 
   <script src="app.js"></script>

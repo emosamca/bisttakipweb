@@ -97,11 +97,21 @@ input:focus, select:focus { border-color: var(--primary); }
 .content { flex: 1; padding: 24px 32px; max-width: 1400px; }
 .content h2 { margin: 0 0 20px; }
 
+/* ---- Dashboard sekmeleri ---- */
+.dash-tabs { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.dash-tabs .tab { background: transparent; border: none; color: var(--muted); padding: 10px 18px; cursor: pointer; font-size: 15px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.dash-tabs .tab:hover { color: var(--text); }
+.dash-tabs .tab.active { color: var(--text); border-bottom-color: var(--primary); font-weight: 600; }
+
 /* ---- Cards ---- */
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
 .card { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
 .card-label { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
 .card-value { font-size: 24px; font-weight: 600; }
+.card.clickable { cursor: pointer; transition: border-color .15s, transform .15s, box-shadow .15s; }
+.card.clickable:hover { border-color: var(--accent, #2f81f7); transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
+.card.highlight { background: linear-gradient(135deg, rgba(47,129,247,0.18), rgba(47,129,247,0.04)); border-color: var(--accent, #2f81f7); }
+.card.highlight .card-value { color: var(--accent, #2f81f7); font-size: 28px; }
 .card-sub { font-size: 13px; margin-top: 4px; color: var(--muted); }
 .pos { color: var(--green) !important; }
 .neg { color: var(--red) !important; }
@@ -116,6 +126,10 @@ input:focus, select:focus { border-color: var(--primary); }
 .chart-wrap { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
 .pie { width: 200px; height: 200px; flex-shrink: 0; }
 .pie svg { width: 100%; height: 100%; }
+.pie-lg { width: 260px; height: 260px; }
+.pie-pct { fill: #fff; font-size: 11px; font-weight: 700; pointer-events: none; }
+.pie-center-lbl { fill: var(--muted); font-size: 11px; }
+.pie-center-val { fill: var(--text, #e6edf3); font-size: 17px; font-weight: 700; }
 .legend { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 160px; }
 .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .legend-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }

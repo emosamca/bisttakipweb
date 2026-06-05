@@ -6,6 +6,16 @@ const num = (n) =>
   new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 4 }).format(Number(n) || 0);
 const usd = (n) =>
   new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'USD' }).format(Number(n) || 0);
+// Kripto birim fiyatlari icin 8 ondalik basamak
+const usd8 = (n) =>
+  new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'USD', minimumFractionDigits: 8, maximumFractionDigits: 8 }).format(Number(n) || 0);
+const tl8 = (n) =>
+  new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', minimumFractionDigits: 8, maximumFractionDigits: 8 }).format(Number(n) || 0);
+// USDT tutari ve yuksek hassasiyetli adet (kripto/binance)
+const usdt = (n) =>
+  new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0) + ' USDT';
+const num8 = (n) =>
+  new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 8 }).format(Number(n) || 0);
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -65,6 +75,7 @@ function showApp(username, role, mustChange) {
     return;
   }
   refreshAll();
+  switchDash('genel'); // ilk acilis: Genel sekmesi + dogru menu durumu
   connectEvents();
 }
 
@@ -72,6 +83,11 @@ function showApp(username, role, mustChange) {
 let eventSource = null;
 let priceRefreshTimer = null;
 let historyRefreshTimer = null;
+let usPriceRefreshTimer = null;
+let metalPriceRefreshTimer = null;
+let currencyPriceRefreshTimer = null;
+let binanceRefreshTimer = null;
+let cryptoPriceRefreshTimer = null;
 function connectEvents() {
   if (eventSource) return; // zaten bagli
   eventSource = new EventSource('/api/events');
@@ -81,12 +97,47 @@ function connectEvents() {
     priceRefreshTimer = setTimeout(() => {
       loadSummary();
       loadPrices();
+      maybeRefreshGenel();
     }, 250);
   });
   // price_history degisince (servis) portfoy degeri grafigini yenile
   eventSource.addEventListener('history_change', () => {
     clearTimeout(historyRefreshTimer);
     historyRefreshTimer = setTimeout(() => loadPortfolioHistory(), 300);
+  });
+  // ABD fiyat / USD-TRY degisince ABD dashboard'u yenile
+  // (USD/TRY doviz panosundaki Dolar kurunu da etkiler -> onu da yenile)
+  eventSource.addEventListener('us_price_change', () => {
+    clearTimeout(usPriceRefreshTimer);
+    usPriceRefreshTimer = setTimeout(() => {
+      usLoadSummary(); usLoadPrices();
+      currencyLoadSummary(); currencyLoadPrices();
+      cryptoLoadSummary(); cryptoLoadPrices(); // kripto TL degeri USD/TRY'ye bagli
+      maybeRefreshGenel();
+    }, 300);
+  });
+  // Kiymetli maden gram fiyati degisince maden panosunu yenile
+  eventSource.addEventListener('metal_price_change', () => {
+    clearTimeout(metalPriceRefreshTimer);
+    metalPriceRefreshTimer = setTimeout(() => { metalLoadSummary(); metalLoadPrices(); maybeRefreshGenel(); }, 300);
+  });
+  // Doviz (EUR) kuru degisince doviz panosunu yenile
+  eventSource.addEventListener('currency_price_change', () => {
+    clearTimeout(currencyPriceRefreshTimer);
+    currencyPriceRefreshTimer = setTimeout(() => { currencyLoadSummary(); currencyLoadPrices(); maybeRefreshGenel(); }, 300);
+  });
+  // Kripto fiyati degisince kripto panosunu yenile
+  eventSource.addEventListener('crypto_price_change', () => {
+    clearTimeout(cryptoPriceRefreshTimer);
+    cryptoPriceRefreshTimer = setTimeout(() => { cryptoLoadSummary(); cryptoLoadPrices(); maybeRefreshGenel(); }, 300);
+  });
+  // Binance toplami (5 dk'da bir sunucu yeniler) degisince Genel kartini + acik Binance sayfasini yenile
+  eventSource.addEventListener('binance_change', () => {
+    clearTimeout(binanceRefreshTimer);
+    binanceRefreshTimer = setTimeout(() => {
+      maybeRefreshGenel();
+      if (!$('binanceDash').classList.contains('hidden')) binanceLoadPortfolio();
+    }, 300);
   });
   // hata olursa EventSource kendiliginden yeniden baglanir
 }
@@ -151,7 +202,8 @@ function openPurchaseModal(row) {
     $('pUsd').value = row.usd_rate || '';
     $('pCommission').value = row.commission_rate != null ? Number(row.commission_rate) : '';
     $('pBsmv').value = row.bsmv_rate != null ? Number(row.bsmv_rate) : '';
-    priceManual = true; // duzenlemede mevcut fiyatin uzerine yazma
+    priceManual = true; // duzenlemede mevcut fiyatin/kurun uzerine yazma
+    pUsdManual = true;
   } else {
     $('purchaseTitle').textContent = 'Alım Ekle';
     $('pId').value = '';
@@ -162,14 +214,32 @@ function openPurchaseModal(row) {
     $('pCommission').value = localStorage.getItem('lastCommission') || '';
     $('pBsmv').value = localStorage.getItem('lastBsmv') || '';
     priceManual = false; // tarih/hisseye gore otomatik doldurulabilir
+    pUsdManual = false;
   }
   updatePurchaseCalc();
   updateBeforeInfo();
   maybeAutofillPrice();
+  maybeAutofillFx();
   openModal('purchaseModal');
   focusDate('pDate');
 }
 $('openPurchase').addEventListener('click', () => openPurchaseModal(null));
+
+// Dolar kuru: tarihe gore fx_rates_history'den getir (elle degistirilmediyse)
+let pUsdManual = false;
+async function maybeAutofillFx() {
+  if (pUsdManual) return;
+  const date = $('pDate').value;
+  if (!date) return;
+  try {
+    const r = await api(`/api/fx-on?date=${date}`);
+    if (pUsdManual) return;
+    if (r && r.rate != null) {
+      $('pUsd').value = r.rate;
+      updatePurchaseCalc();
+    }
+  } catch (_) {}
+}
 
 // Son kullanilan hisse: oncelik localStorage, yoksa en son eklenen alimdan.
 function lastUsedSymbol() {
@@ -246,12 +316,17 @@ async function maybeAutofillPrice() {
   } catch (_) {}
 }
 
-['pQty', 'pUsd', 'pCommission', 'pBsmv'].forEach((id) =>
+['pQty', 'pCommission', 'pBsmv'].forEach((id) =>
   $(id).addEventListener('input', updatePurchaseCalc)
 );
 // Fiyat alanini kullanici elle degistirirse otomatik doldurmayi durdur
 $('pPrice').addEventListener('input', () => {
   priceManual = true;
+  updatePurchaseCalc();
+});
+// Dolar kurunu kullanici elle degistirirse otomatik doldurmayi durdur
+$('pUsd').addEventListener('input', () => {
+  pUsdManual = true;
   updatePurchaseCalc();
 });
 ['pSymbol', 'pDate'].forEach((id) =>
@@ -260,6 +335,7 @@ $('pPrice').addEventListener('input', () => {
     beforeTimer = setTimeout(() => {
       updateBeforeInfo();
       maybeAutofillPrice();
+      maybeAutofillFx();
     }, 350);
   })
 );
@@ -468,6 +544,62 @@ function renderPie(holdings, cash) {
         <span class="legend-dot" style="background:${color}"></span>
         <span class="lg-name">${it.symbol}</span>
         <span class="lg-val">${tl(it.value)} · %${pct}</span>
+      </div>`;
+    })
+    .join('');
+}
+
+// ---- Genel: varlik dagilimi donut grafigi (saf SVG, profesyonel) ----
+// items: [{ name, value, color }]
+function renderGenelPie(items, total) {
+  const chart = $('genPie');
+  const legend = $('genLegend');
+  const data = items.filter((i) => i.value > 0);
+  const sum = data.reduce((s, i) => s + i.value, 0);
+  if (!data.length || sum <= 0) {
+    chart.innerHTML = '<div class="chart-empty">Görüntülenecek varlık yok</div>';
+    legend.innerHTML = '';
+    return;
+  }
+
+  const cx = 100, cy = 100, rOut = 92, rIn = 58, rLbl = (rOut + rIn) / 2;
+  let angle = -Math.PI / 2;
+  let svg = '';
+  data.forEach((it) => {
+    const frac = it.value / sum;
+    const slice = frac * 2 * Math.PI;
+    const a1 = angle, a2 = angle + slice;
+    angle = a2;
+    if (data.length === 1) {
+      // tek varlik: tam halka
+      svg += `<circle cx="${cx}" cy="${cy}" r="${rOut}" fill="${it.color}" />`;
+    } else {
+      const x1 = cx + rOut * Math.cos(a1), y1 = cy + rOut * Math.sin(a1);
+      const x2 = cx + rOut * Math.cos(a2), y2 = cy + rOut * Math.sin(a2);
+      const large = slice > Math.PI ? 1 : 0;
+      svg += `<path d="M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${rOut},${rOut} 0 ${large} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z" fill="${it.color}" stroke="var(--bg-soft)" stroke-width="2" />`;
+    }
+    // dilim icine yuzde etiketi (yeterince buyukse)
+    const pct = frac * 100;
+    if (pct >= 6) {
+      const mid = (a1 + a2) / 2;
+      const lx = cx + rLbl * Math.cos(mid), ly = cy + rLbl * Math.sin(mid);
+      svg += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" dominant-baseline="central" class="pie-pct">%${pct.toFixed(0)}</text>`;
+    }
+  });
+  // donut deligi + merkez toplam
+  svg += `<circle cx="${cx}" cy="${cy}" r="${rIn}" fill="var(--bg-soft)" />`;
+  svg += `<text x="${cx}" y="${cy - 8}" text-anchor="middle" class="pie-center-lbl">Toplam Bütçe</text>`;
+  svg += `<text x="${cx}" y="${cy + 12}" text-anchor="middle" class="pie-center-val">${kfmt(total)} ₺</text>`;
+  chart.innerHTML = `<svg viewBox="0 0 200 200">${svg}</svg>`;
+
+  legend.innerHTML = data
+    .map((it) => {
+      const pct = ((it.value / sum) * 100).toFixed(1);
+      return `<div class="legend-item">
+        <span class="legend-dot" style="background:${it.color}"></span>
+        <span class="lg-name">${esc(it.name)}</span>
+        <span class="lg-val">${tl(it.value)} · <strong>%${pct}</strong></span>
       </div>`;
     })
     .join('');
@@ -1214,6 +1346,1235 @@ $('dividendForm').addEventListener('submit', async (e) => {
     err.classList.remove('hidden');
   }
 });
+
+// ===================== ABD (US) DASHBOARD =====================
+function switchDash(which) {
+  const isGenel = which === 'genel';
+  const isBist = which === 'bist';
+  const isUs = which === 'us';
+  const isMetal = which === 'metal';
+  const isCurrency = which === 'currency';
+  const isCrypto = which === 'crypto';
+  const isBinance = which === 'binance';
+  $('genelDash').classList.toggle('hidden', !isGenel);
+  $('bistDash').classList.toggle('hidden', !isBist);
+  $('usDash').classList.toggle('hidden', !isUs);
+  $('metalDash').classList.toggle('hidden', !isMetal);
+  $('currencyDash').classList.toggle('hidden', !isCurrency);
+  $('cryptoDash').classList.toggle('hidden', !isCrypto);
+  $('binanceDash').classList.toggle('hidden', !isBinance);
+  // Her sekme kendi menusunu gosterir; Genel'de Nakit Duzenleme menusu gosterilir.
+  // Binance sekmesinde menu yoktur (yalnizca Kullanicilar + Parola Degistir).
+  $('genelMenu').classList.toggle('hidden', !isGenel);
+  $('bistMenu').classList.toggle('hidden', !isBist);
+  $('usMenu').classList.toggle('hidden', !isUs);
+  $('metalMenu').classList.toggle('hidden', !isMetal);
+  $('currencyMenu').classList.toggle('hidden', !isCurrency);
+  $('cryptoMenu').classList.toggle('hidden', !isCrypto);
+  $('tabGenel').classList.toggle('active', isGenel);
+  $('tabBist').classList.toggle('active', isBist);
+  $('tabUs').classList.toggle('active', isUs);
+  $('tabMetal').classList.toggle('active', isMetal);
+  $('tabCurrency').classList.toggle('active', isCurrency);
+  $('tabCrypto').classList.toggle('active', isCrypto);
+  $('tabBinance').classList.toggle('active', isBinance);
+  if (isUs) usRefreshAll();
+  if (isMetal) metalRefreshAll();
+  if (isCurrency) currencyRefreshAll();
+  if (isCrypto) cryptoRefreshAll();
+  if (isBinance) binanceLoad();
+  if (isGenel) genelLoadSummary();
+}
+$('tabGenel').addEventListener('click', () => switchDash('genel'));
+$('tabBist').addEventListener('click', () => switchDash('bist'));
+$('tabUs').addEventListener('click', () => switchDash('us'));
+$('tabMetal').addEventListener('click', () => switchDash('metal'));
+$('tabCurrency').addEventListener('click', () => switchDash('currency'));
+$('tabCrypto').addEventListener('click', () => switchDash('crypto'));
+$('tabBinance').addEventListener('click', () => switchDash('binance'));
+
+// Genel kartlarina tiklayinca ilgili sekmeye gec
+document.querySelectorAll('#genelDash .card[data-goto]').forEach((c) =>
+  c.addEventListener('click', () => switchDash(c.dataset.goto))
+);
+
+// Genel sekmesi: BIST toplam varligi + ABD guncel TL degeri + kiymetli maden TL degeri => toplam butce
+async function genelLoadSummary() {
+  const [b, u, m, c, cy, cash, bn] = await Promise.all([
+    api('/api/summary'),
+    api('/api/us/summary'),
+    api('/api/metal/summary'),
+    api('/api/currency/summary'),
+    api('/api/crypto/summary'),
+    api('/api/cash-holdings/summary'),
+    api('/api/binance/total'),
+  ]);
+  const bistAssets = b.totalAssets != null ? b.totalAssets : null;
+  const usValueTry = u.totalValueTRY != null ? u.totalValueTRY : null;
+  const metalValue = m.totalValue != null ? m.totalValue : null;
+  const currencyValue = c.totalValue != null ? c.totalValue : null;
+  const cryptoValue = cy.totalValueTRY != null ? cy.totalValueTRY : null;
+  const cashValue = cash.totalTRY != null ? cash.totalTRY : null;
+  const binanceValue = bn.totalTRY != null ? bn.totalTRY : null;
+  $('genBist').textContent = bistAssets != null ? tl(bistAssets) : '—';
+  $('genUs').textContent = usValueTry != null ? tl(usValueTry) : '—';
+  $('genMetal').textContent = metalValue != null ? tl(metalValue) : '—';
+  $('genCurrency').textContent = currencyValue != null ? tl(currencyValue) : '—';
+  $('genCrypto').textContent = cryptoValue != null ? tl(cryptoValue) : '—';
+  $('genCash').textContent = cashValue != null ? tl(cashValue) : '—';
+  $('genBinance').textContent = binanceValue != null ? tl(binanceValue) : '—';
+  $('genBinanceAt').textContent = bn.at ? `Son: ${new Date(bn.at).toLocaleTimeString('tr-TR')}` : (bn.hasKeys === false ? 'Anahtar yok' : '');
+
+  // Kartlarin altinda K/Z yuzdesi (BIST TL, ABD/Kripto USD bazli, maden/doviz TL)
+  pctSub('genBistPct', b.totalProfit, b.totalCostBasis);
+  pctSub('genUsPct', u.totalProfitUSD, u.totalCostUSD);
+  pctSub('genMetalPct', m.totalProfit, m.totalCost);
+  pctSub('genCurrencyPct', c.totalProfit, c.totalCost);
+  pctSub('genCryptoPct', cy.totalProfitUSD, cy.totalCostUSD);
+  // Toplam butce K/Z: maliyet+kar verisi olan siniflarin TL bazli toplami
+  let aggProfit = 0, aggCost = 0;
+  const addAgg = (p, cost) => { if (p != null && cost > 0) { aggProfit += p; aggCost += cost; } };
+  addAgg(b.totalProfit, b.totalCostBasis);
+  addAgg(u.totalProfitTRY, u.totalCostTRY);
+  addAgg(m.totalProfit, m.totalCost);
+  addAgg(c.totalProfit, c.totalCost);
+  addAgg(cy.totalProfitTRY, cy.totalCostTRY);
+
+  const total = (bistAssets || 0) + (usValueTry || 0) + (metalValue || 0) + (currencyValue || 0) + (cryptoValue || 0) + (cashValue || 0) + (binanceValue || 0);
+  // Toplam butce; dolar karsiligi alt satirda
+  const usdRate = cash.usdRate || (cy.rate || null);
+  $('genTotal').textContent = tl(total);
+  $('genTotalUsd').textContent = usdRate ? `≈ ${usd(total / usdRate)}` : '';
+  pctSub('genTotalPct', aggCost > 0 ? aggProfit : null, aggCost);
+
+  renderGenelPie(
+    [
+      { name: 'BIST', value: bistAssets || 0, color: '#2f81f7' },
+      { name: 'ABD', value: usValueTry || 0, color: '#3fb950' },
+      { name: 'Kıymetli Maden', value: metalValue || 0, color: '#d29922' },
+      { name: 'Döviz', value: currencyValue || 0, color: '#a371f7' },
+      { name: 'Kripto', value: cryptoValue || 0, color: '#f0883e' },
+      { name: 'Nakit', value: cashValue || 0, color: '#39c5cf' },
+      { name: 'Binance', value: binanceValue || 0, color: '#f3ba2f' },
+    ],
+    total
+  );
+}
+function maybeRefreshGenel() {
+  if (!$('genelDash').classList.contains('hidden')) genelLoadSummary();
+}
+
+// Bir kartin altina K/Z yuzdesini renkli yaz (profit/cost). Veri yoksa bos birak.
+function pctSub(elId, profit, cost) {
+  const el = $(elId);
+  if (profit == null || !(cost > 0)) {
+    el.textContent = '';
+    el.className = 'card-sub';
+    return;
+  }
+  const pct = (profit / cost) * 100;
+  const up = profit >= 0;
+  el.textContent = `${up ? '▲' : '▼'} %${Math.abs(pct).toFixed(2)}`;
+  el.className = 'card-sub ' + (up ? 'pos' : 'neg');
+}
+
+// ---- Nakit Duzenleme (elde tutulan TL/EUR/USD) ----
+async function openCashHoldings() {
+  $('cashHoldingsForm').reset();
+  $('chError').classList.add('hidden');
+  try {
+    const h = await api('/api/cash-holdings'); // mevcut degerler otomatik dolsun
+    $('chTry').value = h.try || '';
+    $('chEur').value = h.eur || '';
+    $('chUsd').value = h.usd || '';
+  } catch (_) {}
+  openModal('cashHoldingsModal');
+}
+$('openCashHoldings').addEventListener('click', openCashHoldings);
+$('genCashCard').addEventListener('click', openCashHoldings);
+
+$('cashHoldingsForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('chError');
+  err.classList.add('hidden');
+  const body = JSON.stringify({
+    try: $('chTry').value || 0,
+    eur: $('chEur').value || 0,
+    usd: $('chUsd').value || 0,
+  });
+  try {
+    await api('/api/cash-holdings', { method: 'PUT', body });
+    closeModal('cashHoldingsModal');
+    genelLoadSummary();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
+async function usRefreshAll() {
+  await Promise.all([usLoadSummary(), usLoadPrices(), usLoadPurchases(), usLoadCash()]);
+}
+
+async function usLoadSummary() {
+  const s = await api('/api/us/summary');
+  $('usCardRate').textContent = s.rate != null ? tl(s.rate) : '—';
+  $('usCardCostUsd').textContent = usd(s.totalCostUSD);
+  $('usCardCostTry').textContent = tl(s.totalCostTRY);
+  $('usCardValueUsd').textContent = s.totalValueUSD != null ? usd(s.totalValueUSD) : '—';
+  $('usCardValueTry').textContent = s.totalValueTRY != null ? tl(s.totalValueTRY) : '—';
+  $('usCardDiv').textContent = usd(s.totalDividendsUSD);
+  $('usCardCommission').textContent = usd(s.totalCommissionUSD || 0);
+  if (s.totalProfitUSD != null) {
+    const cls = s.totalProfitUSD >= 0 ? 'pos' : 'neg';
+    $('usCardProfit').textContent = usd(s.totalProfitUSD);
+    $('usCardProfit').className = 'card-value ' + cls;
+    const pct = s.totalCostUSD > 0 ? ((s.totalProfitUSD / s.totalCostUSD) * 100).toFixed(2) : '0';
+    $('usCardProfitPct').textContent = `%${pct}` + (s.totalProfitTRY != null ? ` · ${tl(s.totalProfitTRY)}` : '');
+    $('usCardProfitPct').className = 'card-sub ' + cls;
+  } else {
+    $('usCardProfit').textContent = '—';
+    $('usCardProfit').className = 'card-value';
+    $('usCardProfitPct').textContent = 'Fiyat girilmemiş';
+    $('usCardProfitPct').className = 'card-sub';
+  }
+
+  const tb = $('usHoldingsTable').querySelector('tbody');
+  if (!s.holdings.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="9">Henüz ABD hissesi yok</td></tr>';
+    return;
+  }
+  tb.innerHTML = s.holdings
+    .map((h) => {
+      const pl = h.profitUSD != null
+        ? `<span class="${h.profitUSD >= 0 ? 'pos' : 'neg'}">${usd(h.profitUSD)}${h.profitPctUSD != null ? ` (%${h.profitPctUSD.toFixed(1)})` : ''}</span>`
+        : '<span class="muted">—</span>';
+      return `<tr>
+        <td><strong>${esc(h.symbol)}</strong></td>
+        <td class="num">${num(h.quantity)}</td>
+        <td class="num">${usd(h.avgCostUSD)}</td>
+        <td class="num">${h.currentPrice != null ? usd(h.currentPrice) : '<span class="muted">—</span>'}</td>
+        <td class="num">${usd(h.costBasisUSD)}</td>
+        <td class="num">${tl(h.costTRY)}</td>
+        <td class="num">${h.currentValueUSD != null ? usd(h.currentValueUSD) : '<span class="muted">—</span>'}</td>
+        <td class="num">${h.currentValueTRY != null ? tl(h.currentValueTRY) : '<span class="muted">—</span>'}</td>
+        <td class="num">${pl}</td>
+      </tr>`;
+    })
+    .join('');
+}
+
+async function usLoadPrices() {
+  const rows = await api('/api/us/prices');
+  const tb = $('usPricesTable').querySelector('tbody');
+  tb.innerHTML = rows.length
+    ? rows
+        .map(
+          (r) => `<tr>
+        <td><strong>${esc(r.symbol)}</strong></td>
+        <td class="num">${usd(r.price)}</td>
+        <td class="muted">${new Date(r.updated_at).toLocaleString('tr-TR')}</td>
+      </tr>`
+        )
+        .join('')
+    : '<tr class="empty-row"><td colspan="3">Fiyat verisi yok</td></tr>';
+}
+
+let usPurchaseCache = [];
+let usPurchasePage = 1;
+async function usLoadPurchases() {
+  usPurchaseCache = await api('/api/us/purchases');
+  usRenderPurchases();
+}
+function usRenderPurchases() {
+  const rows = usPurchaseCache;
+  const tb = $('usPurchasesTable').querySelector('tbody');
+  if (!rows.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="9">Kayıt yok</td></tr>';
+    renderPager('usPurchasesPager', 1, 0, () => {});
+    return;
+  }
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if (usPurchasePage > pages) usPurchasePage = pages;
+  const pageRows = rows.slice((usPurchasePage - 1) * PAGE_SIZE, usPurchasePage * PAGE_SIZE);
+  tb.innerHTML = pageRows
+    .map((r) => {
+      const costTry = r.usdtry ? Number(r.total) * Number(r.usdtry) : null;
+      return `<tr>
+        <td>${r.trade_date.slice(0, 10)}</td>
+        <td><strong>${esc(r.symbol)}</strong></td>
+        <td class="num">${num(r.quantity)}</td>
+        <td class="num">${usd(r.price)}</td>
+        <td class="num">${usd(r.total)}</td>
+        <td class="num">${r.usdtry ? num(r.usdtry) : '—'}</td>
+        <td class="num">${costTry != null ? tl(costTry) : '—'}</td>
+        <td><span class="tag ${r.source}">${r.source === 'temettu' ? 'Temettü' : 'Normal'}</span></td>
+        <td><div class="row-actions">
+          <button class="edit-btn" data-edit-up="${r.id}" title="Düzenle">✏️</button>
+          <button class="del-btn" data-del-up="${r.id}" title="Sil">🗑</button>
+        </div></td>
+      </tr>`;
+    })
+    .join('');
+  tb.querySelectorAll('[data-edit-up]').forEach((b) =>
+    b.addEventListener('click', () => usOpenPurchaseModal(usPurchaseCache.find((x) => x.id == b.dataset.editUp)))
+  );
+  tb.querySelectorAll('[data-del-up]').forEach((b) =>
+    b.addEventListener('click', () => usDel('purchases', b.dataset.delUp))
+  );
+  renderPager('usPurchasesPager', usPurchasePage, rows.length, (p) => { usPurchasePage = p; usRenderPurchases(); });
+}
+
+let usCashCache = [];
+let usCashPage = 1;
+async function usLoadCash() {
+  usCashCache = await api('/api/us/cash');
+  usRenderCash();
+}
+function usRenderCash() {
+  const rows = usCashCache;
+  const tb = $('usCashTable').querySelector('tbody');
+  if (!rows.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="6">Kayıt yok</td></tr>';
+    renderPager('usCashPager', 1, 0, () => {});
+    return;
+  }
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if (usCashPage > pages) usCashPage = pages;
+  const pageRows = rows.slice((usCashPage - 1) * PAGE_SIZE, usCashPage * PAGE_SIZE);
+  tb.innerHTML = pageRows
+    .map(
+      (r) => `<tr>
+        <td>${r.move_date.slice(0, 10)}</td>
+        <td><span class="tag ${r.kind}">${r.kind === 'dividend' ? 'Temettü' : 'Nakit'}</span></td>
+        <td>${r.symbol ? esc(r.symbol) : '—'}</td>
+        <td class="num">${usd(r.amount)}</td>
+        <td>${esc(r.note || '')}</td>
+        <td><div class="row-actions">
+          <button class="edit-btn" data-edit-uc="${r.id}" title="Düzenle">✏️</button>
+          <button class="del-btn" data-del-uc="${r.id}" title="Sil">🗑</button>
+        </div></td>
+      </tr>`
+    )
+    .join('');
+  tb.querySelectorAll('[data-edit-uc]').forEach((b) =>
+    b.addEventListener('click', () => usOpenCashModal(usCashCache.find((x) => x.id == b.dataset.editUc)))
+  );
+  tb.querySelectorAll('[data-del-uc]').forEach((b) =>
+    b.addEventListener('click', () => usDel('cash', b.dataset.delUc))
+  );
+  renderPager('usCashPager', usCashPage, rows.length, (p) => { usCashPage = p; usRenderCash(); });
+}
+
+async function usDel(type, id) {
+  if (!confirm('Bu kayıt silinsin mi?')) return;
+  await api(`/api/us/${type}/${id}`, { method: 'DELETE' });
+  usRefreshAll();
+}
+
+// ---- ABD Alım modalı ----
+let usPriceManual = false;
+let usFxManual = false;
+let usBeforeTimer = null;
+
+function usLastSymbol() {
+  return localStorage.getItem('usLastSymbol') || '';
+}
+function usOpenPurchaseModal(row) {
+  $('usPurchaseForm').reset();
+  $('usPError').classList.add('hidden');
+  if (row) {
+    $('usPurchaseTitle').textContent = 'ABD Alım Düzenle';
+    $('usPId').value = row.id;
+    $('usPDate').value = row.trade_date.slice(0, 10);
+    $('usPSymbol').value = row.symbol;
+    $('usPQty').value = row.quantity;
+    $('usPPrice').value = row.price;
+    $('usPSource').value = row.source;
+    $('usPUsdtry').value = row.usdtry || '';
+    $('usPCommission').value = row.commission != null ? Number(row.commission) : '';
+    usPriceManual = true;
+    usFxManual = true;
+  } else {
+    $('usPurchaseTitle').textContent = 'ABD Alım Ekle';
+    $('usPId').value = '';
+    $('usPSource').value = 'normal';
+    $('usPDate').value = todayStr();
+    $('usPSymbol').value = usLastSymbol();
+    // komisyon varsayilan 1.5$ (veya son kullanilan)
+    $('usPCommission').value = localStorage.getItem('usLastCommission') || '1.5';
+    usPriceManual = false;
+    usFxManual = false;
+  }
+  usUpdateCalc();
+  usUpdateBeforeInfo();
+  usAutofill();
+  openModal('usPurchaseModal');
+  focusDate('usPDate');
+}
+$('usOpenPurchase').addEventListener('click', () => usOpenPurchaseModal(null));
+
+function usUpdateCalc() {
+  const qty = Number($('usPQty').value) || 0;
+  const price = Number($('usPPrice').value) || 0;
+  const fx = Number($('usPUsdtry').value) || 0;
+  const comm = Number($('usPCommission').value) || 0; // SABIT USD
+  const base = qty * price;
+  const total = base + comm;
+  $('usPSubtotal').textContent = usd(base);
+  $('usPFees').textContent = usd(comm);
+  $('usPTotal').textContent = usd(total);
+  $('usPTotalTry').textContent = fx > 0 ? tl(total * fx) : '—';
+}
+
+function usResetBeforeInfo() {
+  const box = $('usPBeforeInfo');
+  box.classList.remove('has-data');
+  box.innerHTML = 'Hisse ve tarih girin; bu tarihten önceki durum burada gösterilir.';
+}
+async function usUpdateBeforeInfo() {
+  const symbol = $('usPSymbol').value.trim();
+  const date = $('usPDate').value;
+  const box = $('usPBeforeInfo');
+  if (!symbol || !date) return usResetBeforeInfo();
+  try {
+    const h = await api(`/api/us/holdings-before?symbol=${encodeURIComponent(symbol)}&date=${date}`);
+    if (h.quantity > 0) {
+      box.classList.add('has-data');
+      box.innerHTML = `<strong>${esc(h.symbol)}</strong> — ${date} öncesi: <strong>${num(h.quantity)}</strong> adet, ort. maliyet <strong>${usd(h.avgCost)}</strong>`;
+    } else {
+      box.classList.remove('has-data');
+      box.innerHTML = `<strong>${esc(h.symbol)}</strong> — bu tarihten önce pozisyon yok (ilk alım).`;
+    }
+  } catch {
+    usResetBeforeInfo();
+  }
+}
+
+// fiyat (USD) ve USD/TRY kurunu tarihe gore otomatik getir
+async function usAutofill() {
+  const symbol = $('usPSymbol').value.trim();
+  const date = $('usPDate').value;
+  if (!date) return;
+  if (!usFxManual) {
+    try {
+      const fx = await api(`/api/us/fx-on?date=${date}`);
+      if (!usFxManual && fx && fx.rate != null) { $('usPUsdtry').value = fx.rate; usUpdateCalc(); }
+    } catch (_) {}
+  }
+  if (symbol && !usPriceManual) {
+    try {
+      const pr = await api(`/api/us/price-on?symbol=${encodeURIComponent(symbol)}&date=${date}`);
+      if (!usPriceManual && pr && pr.close != null) { $('usPPrice').value = pr.close; usUpdateCalc(); }
+    } catch (_) {}
+  }
+}
+
+['usPQty', 'usPCommission'].forEach((id) => $(id).addEventListener('input', usUpdateCalc));
+$('usPPrice').addEventListener('input', () => { usPriceManual = true; usUpdateCalc(); });
+$('usPUsdtry').addEventListener('input', () => { usFxManual = true; usUpdateCalc(); });
+['usPSymbol', 'usPDate'].forEach((id) =>
+  $(id).addEventListener('input', () => {
+    clearTimeout(usBeforeTimer);
+    usBeforeTimer = setTimeout(() => { usUpdateBeforeInfo(); usAutofill(); }, 350);
+  })
+);
+
+$('usPurchaseForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('usPError');
+  err.classList.add('hidden');
+  const id = $('usPId').value;
+  const body = JSON.stringify({
+    trade_date: $('usPDate').value,
+    symbol: $('usPSymbol').value,
+    quantity: $('usPQty').value,
+    price: $('usPPrice').value,
+    source: $('usPSource').value,
+    usdtry: $('usPUsdtry').value || null,
+    commission: $('usPCommission').value || 0,
+  });
+  try {
+    await api(id ? `/api/us/purchases/${id}` : '/api/us/purchases', { method: id ? 'PUT' : 'POST', body });
+    const sym = $('usPSymbol').value.trim().toUpperCase();
+    if (sym) localStorage.setItem('usLastSymbol', sym);
+    localStorage.setItem('usLastCommission', $('usPCommission').value || '');
+    closeModal('usPurchaseModal');
+    usRefreshAll();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
+// ---- ABD Nakit/Temettü modalı ----
+function usOpenCashModal(row) {
+  $('usCashForm').reset();
+  $('usCError').classList.add('hidden');
+  if (row) {
+    $('usCashTitle').textContent = 'ABD Nakit / Temettü Düzenle';
+    $('usCId').value = row.id;
+    $('usCDate').value = row.move_date.slice(0, 10);
+    $('usCAmount').value = row.amount;
+    $('usCSymbol').value = row.symbol || '';
+    $('usCNote').value = row.note || '';
+  } else {
+    $('usCashTitle').textContent = 'ABD Nakit / Temettü Ekle';
+    $('usCId').value = '';
+    $('usCDate').value = todayStr();
+  }
+  openModal('usCashModal');
+  focusDate('usCDate');
+}
+$('usOpenCash').addEventListener('click', () => usOpenCashModal(null));
+
+$('usCashForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('usCError');
+  err.classList.add('hidden');
+  const id = $('usCId').value;
+  const body = JSON.stringify({
+    move_date: $('usCDate').value,
+    amount: $('usCAmount').value,
+    symbol: $('usCSymbol').value || null,
+    note: $('usCNote').value || null,
+  });
+  try {
+    await api(id ? `/api/us/cash/${id}` : '/api/us/cash', { method: id ? 'PUT' : 'POST', body });
+    closeModal('usCashModal');
+    usRefreshAll();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
+// ===================== KIYMETLI MADEN DASHBOARD =====================
+const METAL_LABELS = { gold: 'Altın', silver: 'Gümüş' };
+
+async function metalRefreshAll() {
+  await Promise.all([metalLoadSummary(), metalLoadPrices(), metalLoadPurchases()]);
+}
+
+async function metalLoadSummary() {
+  const s = await api('/api/metal/summary');
+  $('mCardCost').textContent = tl(s.totalCost);
+  $('mCardValue').textContent = s.totalValue != null ? tl(s.totalValue) : '—';
+  if (s.totalProfit != null) {
+    const cls = s.totalProfit >= 0 ? 'pos' : 'neg';
+    $('mCardProfit').textContent = tl(s.totalProfit);
+    $('mCardProfit').className = 'card-value ' + cls;
+    const pct = s.totalCost > 0 ? ((s.totalProfit / s.totalCost) * 100).toFixed(2) : '0';
+    $('mCardProfitPct').textContent = `%${pct}`;
+    $('mCardProfitPct').className = 'card-sub ' + cls;
+  } else {
+    $('mCardProfit').textContent = '—';
+    $('mCardProfit').className = 'card-value';
+    $('mCardProfitPct').textContent = 'Fiyat girilmemiş';
+    $('mCardProfitPct').className = 'card-sub';
+  }
+
+  const tb = $('metalHoldingsTable').querySelector('tbody');
+  if (!s.holdings.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="7">Henüz kıymetli maden yok</td></tr>';
+    return;
+  }
+  tb.innerHTML = s.holdings
+    .map((h) => {
+      const pl = h.profit != null
+        ? `<span class="${h.profit >= 0 ? 'pos' : 'neg'}">${tl(h.profit)}${h.profitPct != null ? ` (%${h.profitPct.toFixed(1)})` : ''}</span>`
+        : '<span class="muted">—</span>';
+      return `<tr>
+        <td><strong>${esc(h.label)}</strong></td>
+        <td class="num">${num(h.quantity)}</td>
+        <td class="num">${tl(h.avgCost)}</td>
+        <td class="num">${h.currentPrice != null ? tl(h.currentPrice) : '<span class="muted">—</span>'}</td>
+        <td class="num">${tl(h.costBasis)}</td>
+        <td class="num">${h.currentValue != null ? tl(h.currentValue) : '<span class="muted">—</span>'}</td>
+        <td class="num">${pl}</td>
+      </tr>`;
+    })
+    .join('');
+}
+
+async function metalLoadPrices() {
+  const rows = await api('/api/metal/prices');
+  const tb = $('metalPricesTable').querySelector('tbody');
+  tb.innerHTML = rows.length
+    ? rows
+        .map(
+          (r) => `<tr>
+        <td><strong>${esc(METAL_LABELS[r.metal] || r.metal)}</strong></td>
+        <td class="num">${tl(r.price)}</td>
+        <td class="muted">${new Date(r.updated_at).toLocaleString('tr-TR')}</td>
+      </tr>`
+        )
+        .join('')
+    : '<tr class="empty-row"><td colspan="3">Fiyat verisi yok</td></tr>';
+}
+
+let metalPurchaseCache = [];
+let metalPurchasePage = 1;
+async function metalLoadPurchases() {
+  metalPurchaseCache = await api('/api/metal/purchases');
+  metalRenderPurchases();
+}
+function metalRenderPurchases() {
+  const rows = metalPurchaseCache;
+  const tb = $('metalPurchasesTable').querySelector('tbody');
+  if (!rows.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="6">Kayıt yok</td></tr>';
+    renderPager('metalPurchasesPager', 1, 0, () => {});
+    return;
+  }
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if (metalPurchasePage > pages) metalPurchasePage = pages;
+  const pageRows = rows.slice((metalPurchasePage - 1) * PAGE_SIZE, metalPurchasePage * PAGE_SIZE);
+  tb.innerHTML = pageRows
+    .map(
+      (r) => `<tr>
+        <td>${r.trade_date.slice(0, 10)}</td>
+        <td><strong>${esc(METAL_LABELS[r.metal] || r.metal)}</strong></td>
+        <td class="num">${num(r.quantity)}</td>
+        <td class="num">${tl(r.price)}</td>
+        <td class="num">${tl(r.total)}</td>
+        <td><div class="row-actions">
+          <button class="edit-btn" data-edit-mp="${r.id}" title="Düzenle">✏️</button>
+          <button class="del-btn" data-del-mp="${r.id}" title="Sil">🗑</button>
+        </div></td>
+      </tr>`
+    )
+    .join('');
+  tb.querySelectorAll('[data-edit-mp]').forEach((b) =>
+    b.addEventListener('click', () => metalOpenPurchaseModal(metalPurchaseCache.find((x) => x.id == b.dataset.editMp)))
+  );
+  tb.querySelectorAll('[data-del-mp]').forEach((b) =>
+    b.addEventListener('click', () => metalDelPurchase(b.dataset.delMp))
+  );
+  renderPager('metalPurchasesPager', metalPurchasePage, rows.length, (p) => { metalPurchasePage = p; metalRenderPurchases(); });
+}
+
+async function metalDelPurchase(id) {
+  if (!confirm('Bu kayıt silinsin mi?')) return;
+  await api(`/api/metal/purchases/${id}`, { method: 'DELETE' });
+  metalRefreshAll();
+}
+
+// ---- Kıymetli maden alım modalı ----
+let metalBeforeTimer = null;
+
+// Secilen madene gore son girilen gram fiyatini hatirla
+function metalApplyRememberedPrice() {
+  const metal = $('mPMetal').value;
+  const saved = localStorage.getItem('metalLastPrice_' + metal);
+  $('mPPrice').value = saved || '';
+}
+
+function metalOpenPurchaseModal(row) {
+  $('metalPurchaseForm').reset();
+  $('mPError').classList.add('hidden');
+  if (row) {
+    $('metalPurchaseTitle').textContent = 'Kıymetli Maden Alım Düzenle';
+    $('mPId').value = row.id;
+    $('mPDate').value = row.trade_date.slice(0, 10);
+    $('mPMetal').value = row.metal;
+    $('mPQty').value = row.quantity;
+    $('mPPrice').value = row.price;
+  } else {
+    $('metalPurchaseTitle').textContent = 'Kıymetli Maden Alım Ekle';
+    $('mPId').value = '';
+    $('mPDate').value = todayStr();
+    $('mPMetal').value = localStorage.getItem('metalLastMetal') || 'gold';
+    metalApplyRememberedPrice();
+  }
+  metalUpdateCalc();
+  metalUpdateBeforeInfo();
+  openModal('metalPurchaseModal');
+  focusDate('mPDate');
+}
+$('metalOpenPurchase').addEventListener('click', () => metalOpenPurchaseModal(null));
+
+function metalUpdateCalc() {
+  const qty = Number($('mPQty').value) || 0;
+  const price = Number($('mPPrice').value) || 0;
+  $('mPTotal').textContent = tl(qty * price);
+}
+
+function metalResetBeforeInfo() {
+  const box = $('mPBeforeInfo');
+  box.classList.remove('has-data');
+  box.innerHTML = 'Maden ve tarih girin; bu tarihten önceki durum burada gösterilir.';
+}
+async function metalUpdateBeforeInfo() {
+  const metal = $('mPMetal').value;
+  const date = $('mPDate').value;
+  const box = $('mPBeforeInfo');
+  if (!metal || !date) return metalResetBeforeInfo();
+  try {
+    const h = await api(`/api/metal/holdings-before?metal=${encodeURIComponent(metal)}&date=${date}`);
+    if (h.quantity > 0) {
+      box.classList.add('has-data');
+      box.innerHTML = `<strong>${esc(h.label)}</strong> — ${date} öncesi: <strong>${num(h.quantity)}</strong> gram, ort. maliyet <strong>${tl(h.avgCost)}</strong>/gr`;
+    } else {
+      box.classList.remove('has-data');
+      box.innerHTML = `<strong>${esc(h.label)}</strong> — bu tarihten önce pozisyon yok (ilk alım).`;
+    }
+  } catch {
+    metalResetBeforeInfo();
+  }
+}
+
+['mPQty', 'mPPrice'].forEach((id) => $(id).addEventListener('input', metalUpdateCalc));
+$('mPMetal').addEventListener('change', () => {
+  // duzenleme degil yeni kayitsa, secilen madene gore hatirlanan fiyati uygula
+  if (!$('mPId').value) metalApplyRememberedPrice();
+  metalUpdateCalc();
+  metalUpdateBeforeInfo();
+});
+$('mPDate').addEventListener('input', () => {
+  clearTimeout(metalBeforeTimer);
+  metalBeforeTimer = setTimeout(metalUpdateBeforeInfo, 350);
+});
+
+$('metalPurchaseForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('mPError');
+  err.classList.add('hidden');
+  const id = $('mPId').value;
+  const metal = $('mPMetal').value;
+  const body = JSON.stringify({
+    trade_date: $('mPDate').value,
+    metal,
+    quantity: $('mPQty').value,
+    price: $('mPPrice').value,
+  });
+  try {
+    await api(id ? `/api/metal/purchases/${id}` : '/api/metal/purchases', { method: id ? 'PUT' : 'POST', body });
+    // son kullanilan maden ve o madenin gram fiyatini hatirla
+    localStorage.setItem('metalLastMetal', metal);
+    if ($('mPPrice').value) localStorage.setItem('metalLastPrice_' + metal, $('mPPrice').value);
+    closeModal('metalPurchaseModal');
+    metalRefreshAll();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
+// ===================== DOVIZ DASHBOARD =====================
+const CURRENCY_LABELS = { usd: 'Dolar', eur: 'Euro' };
+
+async function currencyRefreshAll() {
+  await Promise.all([currencyLoadSummary(), currencyLoadPrices(), currencyLoadPurchases()]);
+}
+
+async function currencyLoadSummary() {
+  const s = await api('/api/currency/summary');
+  $('cCardCost').textContent = tl(s.totalCost);
+  $('cCardValue').textContent = s.totalValue != null ? tl(s.totalValue) : '—';
+  if (s.totalProfit != null) {
+    const cls = s.totalProfit >= 0 ? 'pos' : 'neg';
+    $('cCardProfit').textContent = tl(s.totalProfit);
+    $('cCardProfit').className = 'card-value ' + cls;
+    const pct = s.totalCost > 0 ? ((s.totalProfit / s.totalCost) * 100).toFixed(2) : '0';
+    $('cCardProfitPct').textContent = `%${pct}`;
+    $('cCardProfitPct').className = 'card-sub ' + cls;
+  } else {
+    $('cCardProfit').textContent = '—';
+    $('cCardProfit').className = 'card-value';
+    $('cCardProfitPct').textContent = 'Kur girilmemiş';
+    $('cCardProfitPct').className = 'card-sub';
+  }
+
+  const tb = $('currencyHoldingsTable').querySelector('tbody');
+  if (!s.holdings.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="7">Henüz döviz yok</td></tr>';
+    return;
+  }
+  tb.innerHTML = s.holdings
+    .map((h) => {
+      const pl = h.profit != null
+        ? `<span class="${h.profit >= 0 ? 'pos' : 'neg'}">${tl(h.profit)}${h.profitPct != null ? ` (%${h.profitPct.toFixed(1)})` : ''}</span>`
+        : '<span class="muted">—</span>';
+      return `<tr>
+        <td><strong>${esc(h.label)}</strong></td>
+        <td class="num">${num(h.quantity)}</td>
+        <td class="num">${tl(h.avgCost)}</td>
+        <td class="num">${h.currentPrice != null ? tl(h.currentPrice) : '<span class="muted">—</span>'}</td>
+        <td class="num">${tl(h.costBasis)}</td>
+        <td class="num">${h.currentValue != null ? tl(h.currentValue) : '<span class="muted">—</span>'}</td>
+        <td class="num">${pl}</td>
+      </tr>`;
+    })
+    .join('');
+}
+
+async function currencyLoadPrices() {
+  const rows = await api('/api/currency/prices');
+  const tb = $('currencyPricesTable').querySelector('tbody');
+  tb.innerHTML = rows.length
+    ? rows
+        .map(
+          (r) => `<tr>
+        <td><strong>${esc(CURRENCY_LABELS[r.currency] || r.currency)}</strong></td>
+        <td class="num">${r.price > 0 ? tl(r.price) : '<span class="muted">—</span>'}</td>
+        <td class="muted">${r.updated_at ? new Date(r.updated_at).toLocaleString('tr-TR') : '—'}</td>
+      </tr>`
+        )
+        .join('')
+    : '<tr class="empty-row"><td colspan="3">Kur verisi yok</td></tr>';
+}
+
+let currencyPurchaseCache = [];
+let currencyPurchasePage = 1;
+async function currencyLoadPurchases() {
+  currencyPurchaseCache = await api('/api/currency/purchases');
+  currencyRenderPurchases();
+}
+function currencyRenderPurchases() {
+  const rows = currencyPurchaseCache;
+  const tb = $('currencyPurchasesTable').querySelector('tbody');
+  if (!rows.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="6">Kayıt yok</td></tr>';
+    renderPager('currencyPurchasesPager', 1, 0, () => {});
+    return;
+  }
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if (currencyPurchasePage > pages) currencyPurchasePage = pages;
+  const pageRows = rows.slice((currencyPurchasePage - 1) * PAGE_SIZE, currencyPurchasePage * PAGE_SIZE);
+  tb.innerHTML = pageRows
+    .map(
+      (r) => `<tr>
+        <td>${r.trade_date.slice(0, 10)}</td>
+        <td><strong>${esc(CURRENCY_LABELS[r.currency] || r.currency)}</strong></td>
+        <td class="num">${num(r.quantity)}</td>
+        <td class="num">${tl(r.price)}</td>
+        <td class="num">${tl(r.total)}</td>
+        <td><div class="row-actions">
+          <button class="edit-btn" data-edit-cp="${r.id}" title="Düzenle">✏️</button>
+          <button class="del-btn" data-del-cp="${r.id}" title="Sil">🗑</button>
+        </div></td>
+      </tr>`
+    )
+    .join('');
+  tb.querySelectorAll('[data-edit-cp]').forEach((b) =>
+    b.addEventListener('click', () => currencyOpenPurchaseModal(currencyPurchaseCache.find((x) => x.id == b.dataset.editCp)))
+  );
+  tb.querySelectorAll('[data-del-cp]').forEach((b) =>
+    b.addEventListener('click', () => currencyDelPurchase(b.dataset.delCp))
+  );
+  renderPager('currencyPurchasesPager', currencyPurchasePage, rows.length, (p) => { currencyPurchasePage = p; currencyRenderPurchases(); });
+}
+
+async function currencyDelPurchase(id) {
+  if (!confirm('Bu kayıt silinsin mi?')) return;
+  await api(`/api/currency/purchases/${id}`, { method: 'DELETE' });
+  currencyRefreshAll();
+}
+
+// ---- Döviz alım modalı ----
+let currencyBeforeTimer = null;
+
+// Secilen dovize gore son girilen kuru hatirla
+function currencyApplyRememberedPrice() {
+  const cur = $('cPCurrency').value;
+  const saved = localStorage.getItem('currencyLastPrice_' + cur);
+  $('cPPrice').value = saved || '';
+}
+
+function currencyOpenPurchaseModal(row) {
+  $('currencyPurchaseForm').reset();
+  $('cPError').classList.add('hidden');
+  if (row) {
+    $('currencyPurchaseTitle').textContent = 'Döviz Alım Düzenle';
+    $('cPId').value = row.id;
+    $('cPDate').value = row.trade_date.slice(0, 10);
+    $('cPCurrency').value = row.currency;
+    $('cPQty').value = row.quantity;
+    $('cPPrice').value = row.price;
+  } else {
+    $('currencyPurchaseTitle').textContent = 'Döviz Alım Ekle';
+    $('cPId').value = '';
+    $('cPDate').value = todayStr();
+    $('cPCurrency').value = localStorage.getItem('currencyLastCurrency') || 'usd';
+    currencyApplyRememberedPrice();
+  }
+  currencyUpdateCalc();
+  currencyUpdateBeforeInfo();
+  openModal('currencyPurchaseModal');
+  focusDate('cPDate');
+}
+$('currencyOpenPurchase').addEventListener('click', () => currencyOpenPurchaseModal(null));
+
+function currencyUpdateCalc() {
+  const qty = Number($('cPQty').value) || 0;
+  const price = Number($('cPPrice').value) || 0;
+  $('cPTotal').textContent = tl(qty * price);
+}
+
+function currencyResetBeforeInfo() {
+  const box = $('cPBeforeInfo');
+  box.classList.remove('has-data');
+  box.innerHTML = 'Döviz ve tarih girin; bu tarihten önceki durum burada gösterilir.';
+}
+async function currencyUpdateBeforeInfo() {
+  const cur = $('cPCurrency').value;
+  const date = $('cPDate').value;
+  const box = $('cPBeforeInfo');
+  if (!cur || !date) return currencyResetBeforeInfo();
+  try {
+    const h = await api(`/api/currency/holdings-before?currency=${encodeURIComponent(cur)}&date=${date}`);
+    if (h.quantity > 0) {
+      box.classList.add('has-data');
+      box.innerHTML = `<strong>${esc(h.label)}</strong> — ${date} öncesi: <strong>${num(h.quantity)}</strong> adet, ort. maliyet <strong>${tl(h.avgCost)}</strong>`;
+    } else {
+      box.classList.remove('has-data');
+      box.innerHTML = `<strong>${esc(h.label)}</strong> — bu tarihten önce pozisyon yok (ilk alım).`;
+    }
+  } catch {
+    currencyResetBeforeInfo();
+  }
+}
+
+['cPQty', 'cPPrice'].forEach((id) => $(id).addEventListener('input', currencyUpdateCalc));
+$('cPCurrency').addEventListener('change', () => {
+  if (!$('cPId').value) currencyApplyRememberedPrice();
+  currencyUpdateCalc();
+  currencyUpdateBeforeInfo();
+});
+$('cPDate').addEventListener('input', () => {
+  clearTimeout(currencyBeforeTimer);
+  currencyBeforeTimer = setTimeout(currencyUpdateBeforeInfo, 350);
+});
+
+$('currencyPurchaseForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('cPError');
+  err.classList.add('hidden');
+  const id = $('cPId').value;
+  const cur = $('cPCurrency').value;
+  const body = JSON.stringify({
+    trade_date: $('cPDate').value,
+    currency: cur,
+    quantity: $('cPQty').value,
+    price: $('cPPrice').value,
+  });
+  try {
+    await api(id ? `/api/currency/purchases/${id}` : '/api/currency/purchases', { method: id ? 'PUT' : 'POST', body });
+    localStorage.setItem('currencyLastCurrency', cur);
+    if ($('cPPrice').value) localStorage.setItem('currencyLastPrice_' + cur, $('cPPrice').value);
+    closeModal('currencyPurchaseModal');
+    currencyRefreshAll();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
+// ===================== KRIPTO DASHBOARD =====================
+async function cryptoRefreshAll() {
+  await Promise.all([cryptoLoadSummary(), cryptoLoadPrices(), cryptoLoadPurchases()]);
+}
+
+async function cryptoLoadSummary() {
+  const s = await api('/api/crypto/summary');
+  $('cyCardRate').textContent = s.rate != null ? tl(s.rate) : '—';
+  $('cyCardCostUsd').textContent = usd(s.totalCostUSD);
+  $('cyCardValueUsd').textContent = s.totalValueUSD != null ? usd(s.totalValueUSD) : '—';
+  $('cyCardValueTry').textContent = s.totalValueTRY != null ? tl(s.totalValueTRY) : '—';
+  if (s.totalProfitUSD != null) {
+    const cls = s.totalProfitUSD >= 0 ? 'pos' : 'neg';
+    $('cyCardProfit').textContent = usd(s.totalProfitUSD);
+    $('cyCardProfit').className = 'card-value ' + cls;
+    const pct = s.totalCostUSD > 0 ? ((s.totalProfitUSD / s.totalCostUSD) * 100).toFixed(2) : '0';
+    $('cyCardProfitPct').textContent = `%${pct}`;
+    $('cyCardProfitPct').className = 'card-sub ' + cls;
+    $('cyCardProfitTry').textContent = s.totalProfitTRY != null ? tl(s.totalProfitTRY) : '—';
+    $('cyCardProfitTry').className = 'card-value ' + cls;
+  } else {
+    $('cyCardProfit').textContent = '—';
+    $('cyCardProfit').className = 'card-value';
+    $('cyCardProfitPct').textContent = 'Fiyat yok';
+    $('cyCardProfitPct').className = 'card-sub';
+    $('cyCardProfitTry').textContent = '—';
+    $('cyCardProfitTry').className = 'card-value';
+  }
+
+  const tb = $('cryptoHoldingsTable').querySelector('tbody');
+  if (!s.holdings.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="9">Henüz kripto yok</td></tr>';
+    return;
+  }
+  tb.innerHTML = s.holdings
+    .map((h) => {
+      const plUsd = h.profitUSD != null
+        ? `<span class="${h.profitUSD >= 0 ? 'pos' : 'neg'}">${usd(h.profitUSD)}${h.profitPctUSD != null ? ` (%${h.profitPctUSD.toFixed(1)})` : ''}</span>`
+        : '<span class="muted">—</span>';
+      const plTry = h.profitTRY != null
+        ? `<span class="${h.profitTRY >= 0 ? 'pos' : 'neg'}">${tl(h.profitTRY)}</span>`
+        : '<span class="muted">—</span>';
+      return `<tr>
+        <td><strong>${esc(h.symbol)}</strong></td>
+        <td class="num">${num(h.quantity)}</td>
+        <td class="num">${usd8(h.avgCostUSD)}</td>
+        <td class="num">${h.currentPrice != null ? usd8(h.currentPrice) : '<span class="muted">—</span>'}</td>
+        <td class="num">${h.currentPriceTRY != null ? tl8(h.currentPriceTRY) : '<span class="muted">—</span>'}</td>
+        <td class="num">${h.currentValueUSD != null ? usd(h.currentValueUSD) : '<span class="muted">—</span>'}</td>
+        <td class="num">${h.currentValueTRY != null ? tl(h.currentValueTRY) : '<span class="muted">—</span>'}</td>
+        <td class="num">${plUsd}</td>
+        <td class="num">${plTry}</td>
+      </tr>`;
+    })
+    .join('');
+}
+
+async function cryptoLoadPrices() {
+  const rows = await api('/api/crypto/prices');
+  const tb = $('cryptoPricesTable').querySelector('tbody');
+  tb.innerHTML = rows.length
+    ? rows
+        .map(
+          (r) => `<tr>
+        <td><strong>${esc(r.symbol)}</strong></td>
+        <td class="num">${r.priceUSD > 0 ? usd8(r.priceUSD) : '<span class="muted">—</span>'}</td>
+        <td class="num">${r.priceTRY != null && r.priceUSD > 0 ? tl8(r.priceTRY) : '<span class="muted">—</span>'}</td>
+        <td class="muted">${r.updated_at ? new Date(r.updated_at).toLocaleString('tr-TR') : '—'}</td>
+      </tr>`
+        )
+        .join('')
+    : '<tr class="empty-row"><td colspan="4">Fiyat verisi yok</td></tr>';
+}
+
+let cryptoPurchaseCache = [];
+let cryptoPurchasePage = 1;
+async function cryptoLoadPurchases() {
+  cryptoPurchaseCache = await api('/api/crypto/purchases');
+  cryptoRenderPurchases();
+}
+function cryptoRenderPurchases() {
+  const rows = cryptoPurchaseCache;
+  const tb = $('cryptoPurchasesTable').querySelector('tbody');
+  if (!rows.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="6">Kayıt yok</td></tr>';
+    renderPager('cryptoPurchasesPager', 1, 0, () => {});
+    return;
+  }
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if (cryptoPurchasePage > pages) cryptoPurchasePage = pages;
+  const pageRows = rows.slice((cryptoPurchasePage - 1) * PAGE_SIZE, cryptoPurchasePage * PAGE_SIZE);
+  tb.innerHTML = pageRows
+    .map(
+      (r) => `<tr>
+        <td>${r.trade_date.slice(0, 10)}</td>
+        <td><strong>${esc(r.symbol)}</strong></td>
+        <td class="num">${num(r.quantity)}</td>
+        <td class="num">${usd8(r.price)}</td>
+        <td class="num">${usd(r.total)}</td>
+        <td><div class="row-actions">
+          <button class="edit-btn" data-edit-cy="${r.id}" title="Düzenle">✏️</button>
+          <button class="del-btn" data-del-cy="${r.id}" title="Sil">🗑</button>
+        </div></td>
+      </tr>`
+    )
+    .join('');
+  tb.querySelectorAll('[data-edit-cy]').forEach((b) =>
+    b.addEventListener('click', () => cryptoOpenPurchaseModal(cryptoPurchaseCache.find((x) => x.id == b.dataset.editCy)))
+  );
+  tb.querySelectorAll('[data-del-cy]').forEach((b) =>
+    b.addEventListener('click', () => cryptoDelPurchase(b.dataset.delCy))
+  );
+  renderPager('cryptoPurchasesPager', cryptoPurchasePage, rows.length, (p) => { cryptoPurchasePage = p; cryptoRenderPurchases(); });
+}
+
+async function cryptoDelPurchase(id) {
+  if (!confirm('Bu kayıt silinsin mi?')) return;
+  await api(`/api/crypto/purchases/${id}`, { method: 'DELETE' });
+  cryptoRefreshAll();
+}
+
+// ---- Kripto alım modalı ----
+let cryptoBeforeTimer = null;
+
+function cryptoOpenPurchaseModal(row) {
+  $('cryptoPurchaseForm').reset();
+  $('cyPError').classList.add('hidden');
+  if (row) {
+    $('cryptoPurchaseTitle').textContent = 'Kripto Alım Düzenle';
+    $('cyPId').value = row.id;
+    $('cyPDate').value = row.trade_date.slice(0, 10);
+    $('cyPSymbol').value = row.symbol;
+    $('cyPQty').value = row.quantity;
+    $('cyPPrice').value = row.price;
+  } else {
+    $('cryptoPurchaseTitle').textContent = 'Kripto Alım Ekle';
+    $('cyPId').value = '';
+    $('cyPDate').value = todayStr();
+    $('cyPSymbol').value = localStorage.getItem('cryptoLastSymbol') || '';
+  }
+  cryptoUpdateCalc();
+  cryptoUpdateBeforeInfo();
+  openModal('cryptoPurchaseModal');
+  focusDate('cyPDate');
+}
+$('cryptoOpenPurchase').addEventListener('click', () => cryptoOpenPurchaseModal(null));
+
+function cryptoUpdateCalc() {
+  const qty = Number($('cyPQty').value) || 0;
+  const price = Number($('cyPPrice').value) || 0;
+  $('cyPTotal').textContent = usd(qty * price);
+}
+
+function cryptoResetBeforeInfo() {
+  const box = $('cyPBeforeInfo');
+  box.classList.remove('has-data');
+  box.innerHTML = 'Coin ve tarih girin; bu tarihten önceki durum burada gösterilir. Kaydederken coin\'in Binance\'de olup olmadığı kontrol edilir.';
+}
+async function cryptoUpdateBeforeInfo() {
+  const symbol = $('cyPSymbol').value.trim();
+  const date = $('cyPDate').value;
+  const box = $('cyPBeforeInfo');
+  if (!symbol || !date) return cryptoResetBeforeInfo();
+  try {
+    const h = await api(`/api/crypto/holdings-before?symbol=${encodeURIComponent(symbol)}&date=${date}`);
+    if (h.quantity > 0) {
+      box.classList.add('has-data');
+      box.innerHTML = `<strong>${esc(h.symbol)}</strong> — ${date} öncesi: <strong>${num(h.quantity)}</strong> adet, ort. maliyet <strong>${usd8(h.avgCostUSD)}</strong>`;
+    } else {
+      box.classList.remove('has-data');
+      box.innerHTML = `<strong>${esc(h.symbol)}</strong> — bu tarihten önce pozisyon yok (ilk alım).`;
+    }
+  } catch {
+    cryptoResetBeforeInfo();
+  }
+}
+
+['cyPQty', 'cyPPrice'].forEach((id) => $(id).addEventListener('input', cryptoUpdateCalc));
+$('cyPSymbol').addEventListener('input', () => {
+  clearTimeout(cryptoBeforeTimer);
+  cryptoBeforeTimer = setTimeout(cryptoUpdateBeforeInfo, 350);
+});
+$('cyPDate').addEventListener('input', () => {
+  clearTimeout(cryptoBeforeTimer);
+  cryptoBeforeTimer = setTimeout(cryptoUpdateBeforeInfo, 350);
+});
+
+$('cryptoPurchaseForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('cyPError');
+  err.classList.add('hidden');
+  const id = $('cyPId').value;
+  const body = JSON.stringify({
+    trade_date: $('cyPDate').value,
+    symbol: $('cyPSymbol').value,
+    quantity: $('cyPQty').value,
+    price: $('cyPPrice').value,
+  });
+  const submitBtn = $('cryptoPurchaseForm').querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+  const oldLabel = submitBtn.textContent;
+  submitBtn.textContent = 'Kontrol ediliyor…';
+  try {
+    await api(id ? `/api/crypto/purchases/${id}` : '/api/crypto/purchases', { method: id ? 'PUT' : 'POST', body });
+    const sym = $('cyPSymbol').value.trim().toUpperCase().replace(/USDT$/, '');
+    if (sym) localStorage.setItem('cryptoLastSymbol', sym);
+    closeModal('cryptoPurchaseModal');
+    cryptoRefreshAll();
+  } catch (e2) {
+    // Binance'de yoksa veya baska hata: form acik kalir, mesaj gosterilir
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = oldLabel;
+  }
+});
+
+// ===================== BINANCE DASHBOARD =====================
+let bnApiKeyMasked = '';
+let bnApiSecretMasked = '';
+
+async function binanceLoadKeys() {
+  const k = await api('/api/binance/keys');
+  bnApiKeyMasked = k.apiKeyMasked || '';
+  bnApiSecretMasked = k.apiSecretMasked || '';
+  $('bnApiKey').value = bnApiKeyMasked;
+  $('bnApiSecret').value = bnApiSecretMasked;
+  $('bnKeyStatus').textContent = k.hasKeys
+    ? `Kayıtlı anahtar var${k.updatedAt ? ' · ' + new Date(k.updatedAt).toLocaleString('tr-TR') : ''}`
+    : 'Anahtar girilmemiş';
+  return k.hasKeys;
+}
+
+function binanceClearTotals() {
+  $('bnTotalUsdt').textContent = '—';
+  $('bnTotalTry').textContent = '—';
+  $('bnTotalBtc').textContent = '—';
+}
+
+async function binanceLoadPortfolio() {
+  const tb = $('binanceTable').querySelector('tbody');
+  tb.innerHTML = '<tr class="empty-row"><td colspan="4">Yükleniyor…</td></tr>';
+  try {
+    const p = await api('/api/binance/portfolio');
+    if (!p.hasKeys) {
+      binanceClearTotals();
+      tb.innerHTML = '<tr class="empty-row"><td colspan="4">API anahtarı girin</td></tr>';
+      return;
+    }
+    $('bnTotalUsdt').textContent = p.totalUSDT != null ? usdt(p.totalUSDT) : '—';
+    $('bnTotalTry').textContent = p.totalTRY != null ? tl(p.totalTRY) : '—';
+    $('bnTotalBtc').textContent = `${num8(p.totalBTC)} BTC`;
+    tb.innerHTML = p.assets.length
+      ? p.assets
+          .map(
+            (a) => `<tr>
+        <td><strong>${esc(a.asset)}</strong></td>
+        <td class="num">${num8(a.amount)}</td>
+        <td class="num">${a.usdt != null ? usdt(a.usdt) : '—'}</td>
+        <td class="num">${a.try != null ? tl(a.try) : '—'}</td>
+      </tr>`
+          )
+          .join('')
+      : '<tr class="empty-row"><td colspan="4">Varlık yok</td></tr>';
+  } catch (e) {
+    binanceClearTotals();
+    tb.innerHTML = `<tr class="empty-row"><td colspan="4">${esc(e.message)}</td></tr>`;
+  }
+}
+
+async function binanceLoad() {
+  const has = await binanceLoadKeys();
+  if (has) binanceLoadPortfolio();
+  else {
+    binanceClearTotals();
+    $('binanceTable').querySelector('tbody').innerHTML = '<tr class="empty-row"><td colspan="4">API anahtarı girin</td></tr>';
+  }
+}
+
+$('binanceKeyForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('bnKeyError');
+  err.classList.add('hidden');
+  const keyVal = $('bnApiKey').value.trim();
+  const secVal = $('bnApiSecret').value.trim();
+  // Maskeli (degismemis) deger geldiyse bos gonder => sunucu mevcut degeri korur
+  const body = JSON.stringify({
+    apiKey: keyVal === bnApiKeyMasked ? '' : keyVal,
+    apiSecret: secVal === bnApiSecretMasked ? '' : secVal,
+  });
+  $('bnKeyStatus').textContent = 'Doğrulanıyor…';
+  try {
+    await api('/api/binance/keys', { method: 'PUT', body });
+    await binanceLoadKeys();
+    binanceLoadPortfolio();
+    maybeRefreshGenel();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+    $('bnKeyStatus').textContent = '';
+  }
+});
+$('bnRefresh').addEventListener('click', binanceLoadPortfolio);
 
 // ---- Baslangic: oturum kontrolu ----
 (async () => {

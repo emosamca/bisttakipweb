@@ -104,6 +104,145 @@ CREATE TABLE IF NOT EXISTS prices (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- ===================== ABD (US) tablolari =====================
+-- Tamamen ayri; mevcut BIST yapisini etkilemez.
+CREATE TABLE IF NOT EXISTS us_purchases (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  trade_date      DATE NOT NULL,
+  symbol          TEXT NOT NULL,
+  quantity        NUMERIC(18,6) NOT NULL CHECK (quantity > 0),
+  price           NUMERIC(18,6) NOT NULL CHECK (price >= 0),   -- USD
+  source          TEXT NOT NULL DEFAULT 'normal',
+  usdtry          NUMERIC(18,6),                               -- alis anindaki USD/TRY
+  commission_rate NUMERIC(8,4) NOT NULL DEFAULT 0,
+  bsmv_rate       NUMERIC(8,4) NOT NULL DEFAULT 0,
+  total           NUMERIC(18,6) NOT NULL,                      -- USD, masraf dahil
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_us_purchases_user ON us_purchases(user_id);
+CREATE INDEX IF NOT EXISTS idx_us_purchases_symbol ON us_purchases(user_id, symbol);
+
+CREATE TABLE IF NOT EXISTS us_cash_movements (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  move_date   DATE NOT NULL,
+  amount      NUMERIC(18,6) NOT NULL,           -- USD
+  kind        TEXT NOT NULL DEFAULT 'cash',     -- 'cash' | 'dividend'
+  symbol      TEXT,
+  note        TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_us_cash_user ON us_cash_movements(user_id);
+
+-- Guncel ABD fiyatlari (servis doldurur; ORTAK)
+CREATE TABLE IF NOT EXISTS us_prices (
+  id          SERIAL PRIMARY KEY,
+  symbol      TEXT NOT NULL UNIQUE,
+  price       NUMERIC(18,6) NOT NULL CHECK (price >= 0),   -- USD
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ABD gecmis fiyatlari (servis doldurur; ORTAK)
+CREATE TABLE IF NOT EXISTS us_price_history (
+  symbol      TEXT NOT NULL,
+  date        DATE NOT NULL,
+  close       NUMERIC(18,6) NOT NULL,
+  adj_close   NUMERIC(18,6),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (symbol, date)
+);
+
+-- Gunluk USD/TRY kuru (servis doldurur; ORTAK)
+CREATE TABLE IF NOT EXISTS fx_rates (
+  date        DATE PRIMARY KEY,
+  rate        NUMERIC(18,6) NOT NULL,           -- USD/TRY
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ===================== KIYMETLI MADEN tablolari =====================
+-- Tamamen ayri; mevcut yapiyi etkilemez. Komisyon yok; sadece alim.
+CREATE TABLE IF NOT EXISTS metal_purchases (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  trade_date  DATE NOT NULL,
+  metal       TEXT NOT NULL,                                  -- 'gold' | 'silver'
+  quantity    NUMERIC(18,4) NOT NULL CHECK (quantity > 0),    -- gram
+  price       NUMERIC(18,4) NOT NULL CHECK (price >= 0),      -- TL / gram
+  total       NUMERIC(18,4) NOT NULL,                         -- TL (gram * fiyat)
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_metal_purchases_user ON metal_purchases(user_id, metal);
+
+-- Guncel gram TL fiyatlari (servis doldurur; ORTAK). Sadece son deger tutulur.
+CREATE TABLE IF NOT EXISTS metal_prices (
+  metal       TEXT PRIMARY KEY,                               -- 'gold' | 'silver'
+  price       NUMERIC(18,4) NOT NULL CHECK (price >= 0),      -- TL / gram
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ===================== DOVIZ tablolari =====================
+-- Maden ile ayni mantik. Komisyon yok; sadece alim. Birim TL fiyati.
+CREATE TABLE IF NOT EXISTS currency_purchases (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  trade_date  DATE NOT NULL,
+  currency    TEXT NOT NULL,                                  -- 'usd' | 'eur'
+  quantity    NUMERIC(18,4) NOT NULL CHECK (quantity > 0),    -- doviz adedi (USD/EUR)
+  price       NUMERIC(18,4) NOT NULL CHECK (price >= 0),      -- TL / birim (alis kuru)
+  total       NUMERIC(18,4) NOT NULL,                         -- TL (adet * kur)
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_currency_purchases_user ON currency_purchases(user_id, currency);
+
+-- Guncel doviz TL kurlari. USD fx_rates'ten okunur; EUR'yu servis buraya yazar.
+CREATE TABLE IF NOT EXISTS currency_prices (
+  currency    TEXT PRIMARY KEY,                               -- 'usd' | 'eur'
+  price       NUMERIC(18,4) NOT NULL CHECK (price >= 0),      -- TL / birim
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ===================== KRIPTO tablolari =====================
+-- Alim USD (USDT) bazli. symbol = coin (orn 'ADA'); Binance ciftleri symbol||'USDT'.
+-- Kripto adetleri/fiyatlari cok ondalikli olabilir -> NUMERIC(28,10).
+CREATE TABLE IF NOT EXISTS crypto_purchases (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  trade_date  DATE NOT NULL,
+  symbol      TEXT NOT NULL,                                  -- coin (orn 'ADA')
+  quantity    NUMERIC(28,10) NOT NULL CHECK (quantity > 0),   -- coin adedi
+  price       NUMERIC(28,10) NOT NULL CHECK (price >= 0),     -- USD / coin
+  total       NUMERIC(28,10) NOT NULL,                        -- USD (adet * fiyat)
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_crypto_purchases_user ON crypto_purchases(user_id, symbol);
+
+-- Guncel kripto fiyatlari (USD; ORTAK). Yalnizca alimi yapilan coin'ler burada
+-- tutulur -> fiyat ceken servis SELECT symbol FROM crypto_prices ile sadece
+-- gerekli coin'leri ceker. Sadece son fiyat tutulur (volume/degisim yok).
+CREATE TABLE IF NOT EXISTS crypto_prices (
+  symbol      TEXT PRIMARY KEY,                               -- coin (orn 'ADA')
+  price       NUMERIC(28,10) NOT NULL CHECK (price >= 0),     -- USD
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Elde tutulan nakit (kullanici basina tek satir; TL/EUR/USD). Genel panoda kullanilir.
+CREATE TABLE IF NOT EXISTS cash_holdings (
+  user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  try_amount  NUMERIC(18,4) NOT NULL DEFAULT 0,   -- elde TL
+  eur_amount  NUMERIC(18,4) NOT NULL DEFAULT 0,   -- elde EUR
+  usd_amount  NUMERIC(18,4) NOT NULL DEFAULT 0,   -- elde USD
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Kullaniciya ozel Binance API anahtarlari (AES-GCM ile sifreli saklanir; read-only)
+CREATE TABLE IF NOT EXISTS binance_keys (
+  user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  api_key     TEXT NOT NULL,                      -- sifreli
+  api_secret  TEXT NOT NULL,                      -- sifreli
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases(user_id);
 CREATE INDEX IF NOT EXISTS idx_purchases_symbol ON purchases(user_id, symbol);
 CREATE INDEX IF NOT EXISTS idx_cash_user ON cash_movements(user_id);
@@ -119,6 +258,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL
 -- Eski purchases tablosuna komisyon/bsmv sutunlari (eski kayitlar 0)
 ALTER TABLE purchases ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(8,4) NOT NULL DEFAULT 0;
 ALTER TABLE purchases ADD COLUMN IF NOT EXISTS bsmv_rate NUMERIC(8,4) NOT NULL DEFAULT 0;
+
+-- ABD alimlarda komisyon SABIT USD (yuzde/bsmv yok)
+ALTER TABLE us_purchases ADD COLUMN IF NOT EXISTS commission NUMERIC(18,6) NOT NULL DEFAULT 0;
 
 -- Gecmisi olmayan kullanicilar icin mevcut parolayi gecmise tohumla
 INSERT INTO password_history (user_id, password)
@@ -174,6 +316,71 @@ BEGIN
                FOR EACH STATEMENT EXECUTE PROCEDURE notify_history_change()';
   END IF;
 END$$;
+
+-- ABD: us_prices veya fx_rates degisince ABD dashboard'u guncellemek icin bildirim
+CREATE OR REPLACE FUNCTION notify_us_price_change() RETURNS trigger AS $$
+BEGIN
+  PERFORM pg_notify('us_price_change', '');
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS us_prices_notify ON us_prices;
+CREATE TRIGGER us_prices_notify
+  AFTER INSERT OR UPDATE OR DELETE ON us_prices
+  FOR EACH ROW EXECUTE PROCEDURE notify_us_price_change();
+
+DROP TRIGGER IF EXISTS fx_rates_notify ON fx_rates;
+CREATE TRIGGER fx_rates_notify
+  AFTER INSERT OR UPDATE OR DELETE ON fx_rates
+  FOR EACH STATEMENT EXECUTE PROCEDURE notify_us_price_change();
+
+-- Kiymetli maden fiyat satirlarini tohumla (servis bu satirlari gunceller)
+INSERT INTO metal_prices (metal, price) VALUES ('gold', 0), ('silver', 0)
+  ON CONFLICT (metal) DO NOTHING;
+
+-- metal_prices degisince (servis yazinca) kiymetli maden panosunu guncelle
+CREATE OR REPLACE FUNCTION notify_metal_price_change() RETURNS trigger AS $$
+BEGIN
+  PERFORM pg_notify('metal_price_change', '');
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS metal_prices_notify ON metal_prices;
+CREATE TRIGGER metal_prices_notify
+  AFTER INSERT OR UPDATE OR DELETE ON metal_prices
+  FOR EACH STATEMENT EXECUTE PROCEDURE notify_metal_price_change();
+
+-- Doviz fiyat satirlarini tohumla (USD fx_rates'ten okunur; EUR'yu servis gunceller)
+INSERT INTO currency_prices (currency, price) VALUES ('usd', 0), ('eur', 0)
+  ON CONFLICT (currency) DO NOTHING;
+
+-- currency_prices degisince (servis EUR yazinca) doviz panosunu guncelle
+CREATE OR REPLACE FUNCTION notify_currency_price_change() RETURNS trigger AS $$
+BEGIN
+  PERFORM pg_notify('currency_price_change', '');
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS currency_prices_notify ON currency_prices;
+CREATE TRIGGER currency_prices_notify
+  AFTER INSERT OR UPDATE OR DELETE ON currency_prices
+  FOR EACH STATEMENT EXECUTE PROCEDURE notify_currency_price_change();
+
+-- crypto_prices degisince (servis veya alim aninda) kripto panosunu guncelle
+CREATE OR REPLACE FUNCTION notify_crypto_price_change() RETURNS trigger AS $$
+BEGIN
+  PERFORM pg_notify('crypto_price_change', '');
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS crypto_prices_notify ON crypto_prices;
+CREATE TRIGGER crypto_prices_notify
+  AFTER INSERT OR UPDATE OR DELETE ON crypto_prices
+  FOR EACH STATEMENT EXECUTE PROCEDURE notify_crypto_price_change();
 `;
 
 async function migrate() {
