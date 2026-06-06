@@ -250,6 +250,14 @@ CREATE TABLE IF NOT EXISTS telegram_settings (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Aylik enflasyon orani % (ORTAK; kullanici manuel girer). Fon-enflasyon kiyasi icin.
+-- Kumulatif carpan kod tarafinda her ay (1+rate/100) ile hesaplanir.
+CREATE TABLE IF NOT EXISTS tufe (
+  ym          TEXT PRIMARY KEY,                 -- 'YYYY-MM'
+  rate        NUMERIC(10,4) NOT NULL,           -- aylik enflasyon orani %
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Kullanicinin kazandigi basarimlar (kupalar). Tanimlar kodda; burada sadece kazanim.
 CREATE TABLE IF NOT EXISTS user_achievements (
   user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -291,6 +299,15 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL
 -- Eski purchases tablosuna komisyon/bsmv sutunlari (eski kayitlar 0)
 ALTER TABLE purchases ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(8,4) NOT NULL DEFAULT 0;
 ALTER TABLE purchases ADD COLUMN IF NOT EXISTS bsmv_rate NUMERIC(8,4) NOT NULL DEFAULT 0;
+
+-- tufe.idx (eski: endeks) -> tufe.rate (yeni: aylik oran %) yeniden adlandir
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tufe' AND column_name='idx')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tufe' AND column_name='rate') THEN
+    ALTER TABLE tufe RENAME COLUMN idx TO rate;
+  END IF;
+END$$;
 
 -- ABD alimlarda komisyon SABIT USD (yuzde/bsmv yok)
 ALTER TABLE us_purchases ADD COLUMN IF NOT EXISTS commission NUMERIC(18,6) NOT NULL DEFAULT 0;

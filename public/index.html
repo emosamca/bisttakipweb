@@ -38,6 +38,9 @@
         <button class="btn block" id="openDividends">💰 Temettü Girişi</button>
         <button class="btn block" id="openCalc">🧮 Hesap Makinesi</button>
       </div>
+      <div id="fundMenu" class="hidden">
+        <button class="btn primary block" id="openTufe">📊 TÜFE Girişi</button>
+      </div>
       <div id="usMenu" class="hidden">
         <button class="btn primary block" id="usOpenPurchase">+ ABD Alım Ekle</button>
         <button class="btn block" id="usOpenCash">+ ABD Nakit / Temettü Ekle</button>
@@ -68,6 +71,7 @@
       <div class="dash-tabs">
         <button class="tab active" id="tabGenel">🌐 Genel</button>
         <button class="tab" id="tabBist">📊 BIST Dashboard</button>
+        <button class="tab" id="tabFund">📈 BIST Fon</button>
         <button class="tab" id="tabUs">🇺🇸 ABD Dashboard</button>
         <button class="tab" id="tabMetal">🥇 Kıymetli Maden</button>
         <button class="tab" id="tabCurrency">💱 Döviz</button>
@@ -275,6 +279,63 @@
         </section>
       </div>
       </div><!-- /bistDash -->
+
+      <!-- ===================== FON DASHBOARD ===================== -->
+      <div id="fundDash" class="hidden">
+        <section class="cards">
+          <div class="card">
+            <div class="card-label">Fon Birim Fiyatı</div>
+            <div class="card-value" id="fCardPrice">—</div>
+            <div class="card-sub" id="fCardPriceSub"></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Fon Maliyeti (ort. birim)</div>
+            <div class="card-value" id="fCardCost">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Fon Kazancı</div>
+            <div class="card-value" id="fCardGain">—</div>
+            <div class="card-sub" id="fCardGainPct"></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Toplam Pay (adet)</div>
+            <div class="card-value" id="fCardUnits">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Toplam Katkı</div>
+            <div class="card-value" id="fCardContrib">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Güncel Değer</div>
+            <div class="card-value" id="fCardValue">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Enflasyona Karşı (reel)</div>
+            <div class="card-value" id="fCardReal">—</div>
+            <div class="card-sub" id="fCardRealSub"></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Fon Birim Fiyatı (Zaman) · Maliyet · Enflasyon</h3>
+            <div class="chart-legend" id="fundLegend"></div>
+          </div>
+          <div id="fundChart" class="value-chart"><div class="chart-empty">Yükleniyor…</div></div>
+        </section>
+
+        <section class="panel">
+          <h3>Aylık Özet</h3>
+          <div class="table-wrap">
+            <table id="fundMonthlyTable" class="compact">
+              <thead>
+                <tr><th>Ay</th><th class="num">Birim Fiyat</th><th class="num">Aylık %</th><th class="num">Değer</th><th class="num">Pay</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </div><!-- /fundDash -->
 
       <!-- ===================== ABD DASHBOARD ===================== -->
       <div id="usDash" class="hidden">
@@ -1177,6 +1238,37 @@
       <div id="tgMsg" class="card-sub"></div>
       <div class="error hidden" id="tgError"></div>
     </form>
+  </div>
+
+  <!-- TÜFE GİRİŞİ MODAL (aylık enflasyon endeksi) -->
+  <div id="tufeModal" class="modal hidden">
+    <div class="modal-card wide">
+      <div class="modal-head">
+        <h3>TÜFE Endeksi Girişi</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <form id="tufeForm">
+        <div class="grid2">
+          <label>Ay
+            <input type="month" id="tfYm" required />
+          </label>
+          <label>Aylık Enflasyon (%)
+            <input type="number" id="tfRate" step="any" placeholder="örn. 1,71" required />
+          </label>
+        </div>
+        <div class="info-box">O ayın <strong>aylık enflasyon oranını %</strong> olarak girin (örn. 1,71). Sistem her ay <strong>×(1+oran/100)</strong> ile kümülatif enflasyonu hesaplayıp fon birim fiyatıyla karşılaştırır. Deflasyon için eksi girebilirsiniz (örn. -0,5).</div>
+        <div class="modal-foot">
+          <button type="submit" class="btn primary">Kaydet</button>
+        </div>
+        <div class="error hidden" id="tfError"></div>
+      </form>
+      <div class="table-wrap">
+        <table id="tufeTable">
+          <thead><tr><th>Ay</th><th class="num">Aylık %</th><th class="num">Kümülatif</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

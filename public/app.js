@@ -1391,6 +1391,7 @@ $('dividendForm').addEventListener('submit', async (e) => {
 function switchDash(which) {
   const isGenel = which === 'genel';
   const isBist = which === 'bist';
+  const isFund = which === 'fund';
   const isUs = which === 'us';
   const isMetal = which === 'metal';
   const isCurrency = which === 'currency';
@@ -1399,6 +1400,7 @@ function switchDash(which) {
   const isAchv = which === 'achv';
   $('genelDash').classList.toggle('hidden', !isGenel);
   $('bistDash').classList.toggle('hidden', !isBist);
+  $('fundDash').classList.toggle('hidden', !isFund);
   $('usDash').classList.toggle('hidden', !isUs);
   $('metalDash').classList.toggle('hidden', !isMetal);
   $('currencyDash').classList.toggle('hidden', !isCurrency);
@@ -1409,18 +1411,21 @@ function switchDash(which) {
   // Binance ve Basarimlar sekmesinde menu yoktur (yalnizca Kullanicilar + Parola Degistir).
   $('genelMenu').classList.toggle('hidden', !isGenel);
   $('bistMenu').classList.toggle('hidden', !isBist);
+  $('fundMenu').classList.toggle('hidden', !isFund);
   $('usMenu').classList.toggle('hidden', !isUs);
   $('metalMenu').classList.toggle('hidden', !isMetal);
   $('currencyMenu').classList.toggle('hidden', !isCurrency);
   $('cryptoMenu').classList.toggle('hidden', !isCrypto);
   $('tabGenel').classList.toggle('active', isGenel);
   $('tabBist').classList.toggle('active', isBist);
+  $('tabFund').classList.toggle('active', isFund);
   $('tabUs').classList.toggle('active', isUs);
   $('tabMetal').classList.toggle('active', isMetal);
   $('tabCurrency').classList.toggle('active', isCurrency);
   $('tabCrypto').classList.toggle('active', isCrypto);
   $('tabBinance').classList.toggle('active', isBinance);
   $('tabAchv').classList.toggle('active', isAchv);
+  if (isFund) fundLoad();
   if (isUs) usRefreshAll();
   if (isMetal) metalRefreshAll();
   if (isCurrency) currencyRefreshAll();
@@ -1431,6 +1436,7 @@ function switchDash(which) {
 }
 $('tabGenel').addEventListener('click', () => switchDash('genel'));
 $('tabBist').addEventListener('click', () => switchDash('bist'));
+$('tabFund').addEventListener('click', () => switchDash('fund'));
 $('tabUs').addEventListener('click', () => switchDash('us'));
 $('tabMetal').addEventListener('click', () => switchDash('metal'));
 $('tabCurrency').addEventListener('click', () => switchDash('currency'));
@@ -2773,6 +2779,186 @@ function renderAchvCard(a) {
     </div>
   </div>`;
 }
+
+// ===================== FON (birim pay) =====================
+const fund4 = (n) => new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(Number(n) || 0);
+
+async function fundLoad() {
+  let d;
+  try {
+    d = await api('/api/fund');
+  } catch (_) {
+    return;
+  }
+  renderFund(d);
+}
+
+function renderFund(d) {
+  if (!d.hasData) {
+    $('fCardPrice').textContent = '—';
+    ['fCardCost', 'fCardGain', 'fCardUnits', 'fCardContrib', 'fCardValue', 'fCardReal'].forEach((id) => ($(id).textContent = '—'));
+    $('fundChart').innerHTML = '<div class="chart-empty">Henüz nakit girişi (katkı) yok. İlk parayı yatırınca fon başlar.</div>';
+    $('fundMonthlyTable').querySelector('tbody').innerHTML = '<tr class="empty-row"><td colspan="5">Kayıt yok</td></tr>';
+    $('fundLegend').innerHTML = '';
+    return;
+  }
+  // ₺ birim fiyat 4 haneli; fon "1 TL"den basladigi icin fiyatlar ~1-x araliginda
+  $('fCardPrice').textContent = `₺${fund4(d.currentPrice)}`;
+  $('fCardPriceSub').textContent = `Başlangıç: ₺1,0000 · ${shortDate(d.startDate)}`;
+  $('fCardCost').textContent = `₺${fund4(d.avgCost)}`;
+  const gpos = d.gainAbs >= 0;
+  $('fCardGain').textContent = tl(d.gainAbs);
+  $('fCardGain').className = 'card-value ' + (gpos ? 'pos' : 'neg');
+  $('fCardGainPct').textContent = `${gpos ? '▲' : '▼'} %${Math.abs(d.gainPct).toFixed(2)}`;
+  $('fCardGainPct').className = 'card-sub ' + (gpos ? 'pos' : 'neg');
+  $('fCardUnits').textContent = num(d.units);
+  $('fCardContrib').textContent = tl(d.contributions);
+  $('fCardValue').textContent = tl(d.currentValue);
+  if (d.realReturnPct != null) {
+    const rpos = d.realReturnPct >= 0;
+    $('fCardReal').textContent = `${rpos ? '▲' : '▼'} %${Math.abs(d.realReturnPct).toFixed(2)}`;
+    $('fCardReal').className = 'card-value ' + (rpos ? 'pos' : 'neg');
+    $('fCardRealSub').textContent = `Enflasyon çarpanı: ${fund4(d.inflationFactor)}×`;
+  } else {
+    $('fCardReal').textContent = '—';
+    $('fCardReal').className = 'card-value';
+    $('fCardRealSub').textContent = d.hasTufe ? '' : 'TÜFE girilmemiş';
+  }
+  renderFundChart(d.series);
+  renderFundMonthly(d.series);
+}
+
+function renderFundChart(series) {
+  const box = $('fundChart');
+  const leg = $('fundLegend');
+  if (!series || series.length < 2) {
+    box.innerHTML = '<div class="chart-empty">Yeterli veri yok — fiyat geçmişi biriktikçe çizilir.</div>';
+    leg.innerHTML = '';
+    return;
+  }
+  const W = 900, H = 300, pad = { l: 64, r: 16, t: 12, b: 28 };
+  const innerW = W - pad.l - pad.r, innerH = H - pad.t - pad.b;
+  const hasInfl = series.some((s) => s.inflation != null);
+  const all = [];
+  series.forEach((s) => { all.push(s.price, s.avgCost); if (s.inflation != null) all.push(s.inflation); });
+  let min = Math.min(...all), max = Math.max(...all);
+  if (min === max) { min *= 0.99; max = max * 1.01 || 1; }
+  const pd = (max - min) * 0.05; min -= pd; max += pd;
+  const X = (i) => pad.l + (i / (series.length - 1)) * innerW;
+  const Y = (v) => pad.t + innerH - ((v - min) / (max - min)) * innerH;
+  const linePath = (key) =>
+    series
+      .filter((s) => s[key] != null)
+      .map((s, i, arr) => {
+        const gi = series.indexOf(s);
+        return `${i ? 'L' : 'M'}${X(gi).toFixed(1)},${Y(s[key]).toFixed(1)}`;
+      })
+      .join(' ');
+  let grid = '';
+  for (let k = 0; k <= 4; k++) {
+    const v = min + ((max - min) * k) / 4;
+    const y = Y(v);
+    grid += `<line class="grid" x1="${pad.l}" y1="${y.toFixed(1)}" x2="${W - pad.r}" y2="${y.toFixed(1)}"/>` +
+      `<text class="ytick" x="${pad.l - 6}" y="${(y + 4).toFixed(1)}">₺${fund4(v)}</text>`;
+  }
+  let paths = `<path d="${linePath('price')}" fill="none" stroke="#2f81f7" stroke-width="2"/>`;
+  paths += `<path d="${linePath('avgCost')}" fill="none" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="5 4"/>`;
+  if (hasInfl) paths += `<path d="${linePath('inflation')}" fill="none" stroke="#d29922" stroke-width="1.5"/>`;
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}">
+    ${grid}
+    ${paths}
+    <text class="xtick" x="${pad.l}" y="${H - 8}" style="text-anchor:start">${shortDate(series[0].date)}</text>
+    <text class="xtick" x="${W - pad.r}" y="${H - 8}" style="text-anchor:end">${shortDate(series[series.length - 1].date)}</text>
+  </svg>`;
+  leg.innerHTML =
+    '<span class="cl-item"><span class="cl-line" style="background:#2f81f7"></span>Birim Fiyat</span>' +
+    '<span class="cl-item"><span class="cl-line" style="background:#8b949e"></span>Maliyet</span>' +
+    (hasInfl ? '<span class="cl-item"><span class="cl-line" style="background:#d29922"></span>Enflasyon</span>' : '');
+}
+
+function renderFundMonthly(series) {
+  // her ayin son noktasi
+  const byMonth = {};
+  series.forEach((s) => { byMonth[s.date.slice(0, 7)] = s; });
+  const months = Object.keys(byMonth).sort();
+  const tb = $('fundMonthlyTable').querySelector('tbody');
+  if (!months.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="5">Kayıt yok</td></tr>';
+    return;
+  }
+  let prevPrice = null;
+  tb.innerHTML = months
+    .map((m) => {
+      const s = byMonth[m];
+      const chg = prevPrice ? ((s.price - prevPrice) / prevPrice) * 100 : null;
+      prevPrice = s.price;
+      const chgTxt = chg == null ? '—' : `<span class="${chg >= 0 ? 'pos' : 'neg'}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}</span>`;
+      return `<tr>
+        <td>${m}</td>
+        <td class="num">₺${fund4(s.price)}</td>
+        <td class="num">${chgTxt}</td>
+        <td class="num">${tl(s.value)}</td>
+        <td class="num">${num(s.units)}</td>
+      </tr>`;
+    })
+    .join('');
+}
+
+// ---- TÜFE girişi ----
+async function openTufe() {
+  $('tufeForm').reset();
+  $('tfError').classList.add('hidden');
+  await tufeLoad();
+  openModal('tufeModal');
+}
+$('openTufe').addEventListener('click', openTufe);
+
+async function tufeLoad() {
+  const rows = await api('/api/tufe'); // ym ascending
+  const tb = $('tufeTable').querySelector('tbody');
+  if (!rows.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="4">Kayıt yok</td></tr>';
+    return;
+  }
+  let cum = 1;
+  // tabloyu yeniden eskiye gostermek icin once kumulatifi hesapla
+  const withCum = rows.map((r) => {
+    cum *= 1 + Number(r.rate) / 100;
+    return { ...r, cum };
+  });
+  tb.innerHTML = withCum
+    .slice()
+    .reverse()
+    .map(
+      (r) => `<tr>
+        <td>${r.ym}</td>
+        <td class="num ${r.rate >= 0 ? 'pos' : 'neg'}">${r.rate >= 0 ? '+' : ''}${num(r.rate)}</td>
+        <td class="num">${((r.cum - 1) * 100).toFixed(2)}%</td>
+        <td><button class="del-btn" data-del-tf="${r.ym}" title="Sil">🗑</button></td>
+      </tr>`
+    )
+    .join('');
+  tb.querySelectorAll('[data-del-tf]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      await api(`/api/tufe/${b.dataset.delTf}`, { method: 'DELETE' });
+      tufeLoad();
+    })
+  );
+}
+
+$('tufeForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('tfError');
+  err.classList.add('hidden');
+  try {
+    await api('/api/tufe', { method: 'PUT', body: JSON.stringify({ ym: $('tfYm').value, rate: $('tfRate').value }) });
+    $('tufeForm').reset();
+    tufeLoad();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
 
 // ---- Baslangic: oturum kontrolu ----
 (async () => {

@@ -14,6 +14,7 @@ const cryptoportfolio = require('./cryptoportfolio');
 const binance = require('./binance');
 const telegram = require('./telegram');
 const achievements = require('./achievements');
+const fund = require('./fund');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1556,6 +1557,54 @@ app.get('/api/snapshots', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Alinamadi' });
+  }
+});
+
+// ===================== FON (birim pay) + TÜFE =====================
+app.get('/api/fund', requireAuth, async (req, res) => {
+  try {
+    res.json(await fund.computeFund(req.session.userId));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Fon hesaplanamadı' });
+  }
+});
+
+app.get('/api/tufe', requireAuth, async (req, res) => {
+  try {
+    const r = await db.query('SELECT ym, rate FROM tufe ORDER BY ym');
+    res.json(r.rows.map((x) => ({ ym: x.ym, rate: Number(x.rate) })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Liste alınamadı' });
+  }
+});
+
+app.put('/api/tufe', requireAuth, async (req, res) => {
+  const { ym, rate } = req.body || {};
+  if (!ym || !/^\d{4}-\d{2}$/.test(ym)) return res.status(400).json({ error: 'Ay YYYY-MM biçiminde olmalı' });
+  const v = Number(rate);
+  if (!Number.isFinite(v) || v <= -100) return res.status(400).json({ error: 'Geçerli bir aylık enflasyon oranı (%) girin' });
+  try {
+    await db.query(
+      `INSERT INTO tufe (ym, rate, updated_at) VALUES ($1,$2, now())
+       ON CONFLICT (ym) DO UPDATE SET rate=EXCLUDED.rate, updated_at=now()`,
+      [ym, v]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Kaydedilemedi' });
+  }
+});
+
+app.delete('/api/tufe/:ym', requireAuth, async (req, res) => {
+  try {
+    await db.query('DELETE FROM tufe WHERE ym=$1', [req.params.ym]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Silinemedi' });
   }
 });
 

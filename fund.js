@@ -1,0 +1,185 @@
+// BIST portfoyunu "birim pay (fon)" mantigiyla degerler (unitization).
+// - Ilk katki birim fiyati 1,00 TL kabul edilir; o kadar adet pay alinir.
+// - Sonraki her katkida birim fiyat = (o anki portfoy degeri / mevcut pay), yeni
+//   para bu fiyattan pay alir. Piyasa hareketi/temettu pay sayisini degistirmez,
+//   birim fiyati degistirir. Fon degeri = nakit + hisse (Toplam Varlik).
+const db = require('./db');
+const portfolio = require('./portfolio');
+
+// Ayni gun icinde olay onceligi: temettu/duzeltme -> katki -> alim
+const TP = { dividend: 0, adjust: 1, deposit: 2, buy: 3 };
+
+async function computeFund(userId) {
+  const purchases = (
+    await db.query('SELECT trade_date, symbol, quantity, total FROM purchases WHERE user_id=$1 ORDER BY trade_date, id', [userId])
+  ).rows.map((r) => ({ date: r.trade_date, symbol: r.symbol, qty: Number(r.quantity), total: Number(r.total) }));
+
+  const moves = (
+    await db.query("SELECT move_date, amount, kind, COALESCE(note,'') note FROM cash_movements WHERE user_id=$1 ORDER BY move_date, id", [userId])
+  ).rows.map((r) => ({ date: r.move_date, amount: Number(r.amount), kind: r.kind, note: r.note }));
+
+  // Gercek nakit girisleri (katki) = kind cash, "Nakit duzeltme" haric, pozitif
+  const deposits = moves.filter((m) => m.kind === 'cash' && m.note !== 'Nakit düzeltme' && m.amount > 0);
+  if (!deposits.length) return { hasData: false };
+  const startDate = deposits[0].date;
+
+  // price_history (kullanicinin sembolleri)
+  let ph = [];
+  try {
+    ph = (
+      await db.query(
+        `SELECT symbol, date, close FROM price_history
+          WHERE symbol IN (SELECT DISTINCT symbol FROM purchases WHERE user_id=$1) AND date >= $2
+          ORDER BY symbol, date`,
+        [userId, startDate]
+      )
+    ).rows;
+  } catch (e) {
+    if (e.code !== '42P01') throw e;
+  }
+  const phMap = {};
+  for (const r of ph) (phMap[r.symbol] = phMap[r.symbol] || []).push({ date: r.date, close: Number(r.close) });
+  const closeOnOrBefore = (sym, date) => {
+    const arr = phMap[sym];
+    if (!arr || !arr.length) return null;
+    let res = null;
+    for (const x of arr) {
+      if (x.date <= date) res = x.close;
+      else break;
+    }
+    return res === null ? arr[0].close : res; // erken donem: ilk kapanisi ileri tasi
+  };
+
+  // ---- Pass 1: olaylari kronolojik isle, her katkida birikimli pay ----
+  const events = [];
+  for (const p of purchases) events.push({ date: p.date, t: 'buy', p });
+  for (const m of moves) {
+    if (m.kind === 'dividend') events.push({ date: m.date, t: 'dividend', m });
+    else if (m.kind === 'cash' && m.note === 'Nakit düzeltme') events.push({ date: m.date, t: 'adjust', m });
+    else if (m.kind === 'cash') events.push({ date: m.date, t: 'deposit', m });
+  }
+  events.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : TP[a.t] - TP[b.t]));
+
+  let units = 0, cash = 0, contributions = 0;
+  const holdings = {};
+  const depPoints = []; // {date, cumUnits, cumContrib}
+  for (const ev of events) {
+    if (ev.t === 'buy') {
+      cash -= ev.p.total;
+      holdings[ev.p.symbol] = (holdings[ev.p.symbol] || 0) + ev.p.qty;
+    } else if (ev.t === 'dividend' || ev.t === 'adjust') {
+      cash += ev.m.amount;
+    } else if (ev.t === 'deposit') {
+      let stockVal = 0;
+      for (const sym in holdings) {
+        const c = closeOnOrBefore(sym, ev.date);
+        if (c) stockVal += holdings[sym] * c;
+      }
+      const vBefore = stockVal + cash;
+      const price = units > 0 ? vBefore / units : 1; // ilk katki -> 1,00
+      const newUnits = price > 0 ? ev.m.amount / price : 0;
+      units += newUnits;
+      cash += ev.m.amount;
+      contributions += ev.m.amount;
+      depPoints.push({ date: ev.date, cumUnits: units, cumContrib: contributions });
+    }
+  }
+
+  // ---- TUFE (aylik oran %) -> kumulatif endeks ----
+  const tufeRows = (await db.query('SELECT ym, rate FROM tufe ORDER BY ym')).rows.map((r) => ({ ym: r.ym, rate: Number(r.rate) }));
+  // her girilen ay icin (1+rate/100) carpimiyla kumulatif endeks
+  const cumByYm = [];
+  let cum = 1;
+  for (const t of tufeRows) { cum *= 1 + t.rate / 100; cumByYm.push({ ym: t.ym, cum }); }
+  const cumAt = (ym) => {
+    let v = 1;
+    for (const c of cumByYm) { if (c.ym <= ym) v = c.cum; else break; }
+    return v;
+  };
+  // Baz: baslangic ayindan ONCEKI aylarin kumulatifi (fon ay basinda basladigi icin
+  // baslangic ayinin enflasyonu da kiyasa dahil olur).
+  const sm = startDate.slice(0, 7);
+  let startCum = 1;
+  for (const c of cumByYm) { if (c.ym < sm) startCum = c.cum; else break; }
+  // baslangictan o tarihe enflasyon carpani (1'den baslar); TUFE yoksa null
+  const tufeAt = (date) => (tufeRows.length ? cumAt(date.slice(0, 7)) / startCum : null);
+  const tufeStart = tufeRows.length ? 1 : null;
+
+  // ---- Gunluk seri ----
+  const unitsAt = (date) => {
+    let u = 0;
+    for (const d of depPoints) { if (d.date <= date) u = d.cumUnits; else break; }
+    return u;
+  };
+  const contribAt = (date) => {
+    let c = 0;
+    for (const d of depPoints) { if (d.date <= date) c = d.cumContrib; else break; }
+    return c;
+  };
+
+  const gridSet = new Set();
+  for (const r of ph) if (r.date >= startDate) gridSet.add(r.date);
+  gridSet.add(startDate);
+  for (const d of depPoints) gridSet.add(d.date);
+  const gridDates = [...gridSet].sort();
+
+  const series = [];
+  for (const date of gridDates) {
+    const h = {};
+    let csh = 0;
+    for (const p of purchases) if (p.date <= date) { h[p.symbol] = (h[p.symbol] || 0) + p.qty; csh -= p.total; }
+    for (const m of moves) if (m.date <= date) csh += m.amount;
+    let stockVal = 0;
+    for (const sym in h) { const c = closeOnOrBefore(sym, date); if (c) stockVal += h[sym] * c; }
+    const u = unitsAt(date);
+    if (u <= 0) continue;
+    const value = stockVal + csh;
+    const contrib = contribAt(date);
+    const ts = tufeAt(date);
+    series.push({
+      date,
+      price: value / u,
+      avgCost: contrib / u,
+      value,
+      units: u,
+      contributed: contrib,
+      inflation: tufeStart && ts ? ts / tufeStart : null,
+    });
+  }
+
+  // ---- Canli guncel nokta ----
+  const sum = await portfolio.summary(userId);
+  const liveValue = sum.totalAssets != null ? sum.totalAssets : series.length ? series[series.length - 1].value : 0;
+  const currentPrice = units > 0 ? liveValue / units : 1;
+  const avgCost = units > 0 ? contributions / units : 1;
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const inflNow = tufeStart && tufeAt(today) ? tufeAt(today) / tufeStart : series.length ? series[series.length - 1].inflation : null;
+  if (series.length && series[series.length - 1].date === today) {
+    const last = series[series.length - 1];
+    last.price = currentPrice; last.value = liveValue; last.avgCost = avgCost;
+  } else {
+    series.push({ date: today, price: currentPrice, avgCost, value: liveValue, units, contributed: contributions, inflation: inflNow });
+  }
+
+  const gainPct = avgCost > 0 ? (currentPrice / avgCost - 1) * 100 : 0;
+  const realReturnPct = inflNow && currentPrice ? (currentPrice / inflNow - 1) * 100 : null;
+
+  return {
+    hasData: true,
+    startDate,
+    units,
+    contributions,
+    currentValue: liveValue,
+    currentPrice,
+    avgCost,
+    gainPct,
+    gainAbs: liveValue - contributions,
+    inflationFactor: inflNow,                                   // baslangictan bugune TUFE carpani (1->X)
+    inflationValue: inflNow != null ? contributions * inflNow : null, // kaba: katki * carpan
+    realReturnPct,
+    hasTufe: tufeRows.length > 0,
+    series,
+  };
+}
+
+module.exports = { computeFund };
