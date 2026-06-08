@@ -15,6 +15,7 @@ const binance = require('./binance');
 const telegram = require('./telegram');
 const achievements = require('./achievements');
 const fund = require('./fund');
+const fundsportfolio = require('./fundsportfolio');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1830,6 +1831,126 @@ async function dailyTick() {
   if (now.getDay() === WEEKLY_DAY) await sendWeeklySummaries(); // haftalik ozet gunu
 }
 
+// ===================== TEFAS FON ALIM route'lari =====================
+app.get('/api/funds/summary', requireAuth, async (req, res) => {
+  try {
+    res.json(await fundsportfolio.summary(req.session.userId));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ozet alinamadi' });
+  }
+});
+
+app.get('/api/funds/holdings-before', requireAuth, async (req, res) => {
+  const { code, date } = req.query;
+  if (!code || !date) return res.status(400).json({ error: 'code ve date gerekli' });
+  try {
+    res.json(await fundsportfolio.holdingsBeforeDate(req.session.userId, code, date));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Hesaplanamadi' });
+  }
+});
+
+app.get('/api/funds/prices', requireAuth, async (req, res) => {
+  try {
+    res.json(await fundsportfolio.pricesList());
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Liste alinamadi' });
+  }
+});
+
+app.get('/api/funds/purchases', requireAuth, async (req, res) => {
+  try {
+    const r = await db.query('SELECT * FROM fund_purchases WHERE user_id=$1 ORDER BY trade_date DESC, id DESC', [req.session.userId]);
+    res.json(r.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Liste alinamadi' });
+  }
+});
+
+function readFundPurchase(body) {
+  const { trade_date, code, quantity, price } = body || {};
+  if (!trade_date || !code || !quantity || price === undefined || price === null) return null;
+  const c = fundsportfolio.normCode(code);
+  if (!c) return { error: 'Fon kodu gerekli' };
+  const qty = Number(quantity);
+  const prc = Number(price);
+  if (!(qty > 0) || !(prc >= 0)) return { error: 'Adet ve fiyat gecerli olmali' };
+  const total = Math.round(qty * prc * 10000) / 10000;
+  const title = (body.title || '').trim();
+  return { trade_date, code: c, qty, prc, total, title };
+}
+
+// Yeni fon eklenince fund_prices'a tohumla (servis guncellemeye baslasin)
+async function seedFundPrice(code, title) {
+  await db.query(
+    `INSERT INTO fund_prices (code, title, price, updated_at) VALUES ($1,$2,0, now())
+     ON CONFLICT (code) DO UPDATE SET title = COALESCE(NULLIF(EXCLUDED.title,''), fund_prices.title)`,
+    [code, title || null]
+  );
+}
+
+// Hicbir kullanicida alimi kalmayan (yetim) fonlari fiyat tablosundan cikar
+// -> servis bosuna fiyat cekmesin
+async function cleanupFundPrices() {
+  await db.query(
+    `DELETE FROM fund_prices fp
+      WHERE NOT EXISTS (SELECT 1 FROM fund_purchases p WHERE p.code = fp.code)`
+  );
+}
+
+app.post('/api/funds/purchases', requireAuth, async (req, res) => {
+  const p = readFundPurchase(req.body);
+  if (!p) return res.status(400).json({ error: 'Tarih, fon kodu, adet ve fiyat gerekli' });
+  if (p.error) return res.status(400).json({ error: p.error });
+  try {
+    const r = await db.query(
+      `INSERT INTO fund_purchases (user_id, trade_date, code, quantity, price, total)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [req.session.userId, p.trade_date, p.code, p.qty, p.prc, p.total]
+    );
+    await seedFundPrice(p.code, p.title); // servis bu fonu cekmeye baslar
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Alim kaydedilemedi' });
+  }
+});
+
+app.put('/api/funds/purchases/:id', requireAuth, async (req, res) => {
+  const p = readFundPurchase(req.body);
+  if (!p) return res.status(400).json({ error: 'Tarih, fon kodu, adet ve fiyat gerekli' });
+  if (p.error) return res.status(400).json({ error: p.error });
+  try {
+    const r = await db.query(
+      `UPDATE fund_purchases SET trade_date=$1, code=$2, quantity=$3, price=$4, total=$5
+        WHERE id=$6 AND user_id=$7 RETURNING *`,
+      [p.trade_date, p.code, p.qty, p.prc, p.total, req.params.id, req.session.userId]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Kayit bulunamadi' });
+    await seedFundPrice(p.code, p.title);
+    await cleanupFundPrices(); // kod degistiyse eski yetim fonu temizle
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Guncellenemedi' });
+  }
+});
+
+app.delete('/api/funds/purchases/:id', requireAuth, async (req, res) => {
+  try {
+    await db.query('DELETE FROM fund_purchases WHERE id=$1 AND user_id=$2', [req.params.id, req.session.userId]);
+    await cleanupFundPrices(); // alimi kalmayan fon fiyat tablosundan cikar
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Silinemedi' });
+  }
+});
+
 // ---- Statik dosyalar ----
 // no-cache: tarayici her seferinde dogrulasin (eski app.js/styles.css takilmasin)
 app.use(
@@ -1889,13 +2010,16 @@ async function ensureDefaultUser() {
     await db.listen('crypto_price_change', () => {
       broadcast('crypto_price_change', { at: Date.now() });
     });
+    // TEFAS fon fiyati degisince fon panosunu guncelle
+    await db.listen('fund_price_change', () => {
+      broadcast('fund_price_change', { at: Date.now() });
+    });
     // Binance toplamlarini 5 dakikada bir yenile (sunucu tarafi; secret burada kalir)
     setTimeout(refreshAllBinance, 10000); // baslangictan 10 sn sonra ilk cekim
     setInterval(refreshAllBinance, 5 * 60 * 1000);
     // Gunluk Telegram ozeti + snapshot: her dakika kontrol, saat gelince gunde bir kez
+    // (snapshot yalnizca zamani gelince alinir; baslangic snapshot'i alinmaz)
     setInterval(dailyTick, 60 * 1000);
-    // Baslangicta bir kez snapshot al (grafik/haftalik icin bugunku veri hazir olsun)
-    setTimeout(() => writeDailySnapshots().catch(() => {}), 20000);
     const gunler = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
     console.log(`Telegram bot ${telegram.configured() ? 'aktif' : 'KAPALI (BOT_TOKEN yok)'}; gunluk ozet ${SUMMARY_HOUR}:00, haftalik ozet ${gunler[WEEKLY_DAY]} ${SUMMARY_HOUR}:00`);
     app.listen(PORT, () => console.log(`Sunucu calisiyor: http://localhost:${PORT}`));

@@ -86,6 +86,7 @@ let historyRefreshTimer = null;
 let usPriceRefreshTimer = null;
 let metalPriceRefreshTimer = null;
 let currencyPriceRefreshTimer = null;
+let fundsPriceRefreshTimer = null;
 let binanceRefreshTimer = null;
 let cryptoPriceRefreshTimer = null;
 function connectEvents() {
@@ -130,6 +131,11 @@ function connectEvents() {
   eventSource.addEventListener('crypto_price_change', () => {
     clearTimeout(cryptoPriceRefreshTimer);
     cryptoPriceRefreshTimer = setTimeout(() => { cryptoLoadSummary(); cryptoLoadPrices(); maybeRefreshGenel(); }, 300);
+  });
+  // TEFAS fon fiyati degisince fon panosunu yenile
+  eventSource.addEventListener('fund_price_change', () => {
+    clearTimeout(fundsPriceRefreshTimer);
+    fundsPriceRefreshTimer = setTimeout(() => { fundsLoadSummary(); fundsLoadPrices(); maybeRefreshGenel(); }, 300);
   });
   // Binance toplami (5 dk'da bir sunucu yeniler) degisince Genel kartini + acik Binance sayfasini yenile
   eventSource.addEventListener('binance_change', () => {
@@ -1396,6 +1402,7 @@ function switchDash(which) {
   const isMetal = which === 'metal';
   const isCurrency = which === 'currency';
   const isCrypto = which === 'crypto';
+  const isFunds = which === 'funds';
   const isBinance = which === 'binance';
   const isAchv = which === 'achv';
   $('genelDash').classList.toggle('hidden', !isGenel);
@@ -1405,6 +1412,7 @@ function switchDash(which) {
   $('metalDash').classList.toggle('hidden', !isMetal);
   $('currencyDash').classList.toggle('hidden', !isCurrency);
   $('cryptoDash').classList.toggle('hidden', !isCrypto);
+  $('fundsDash').classList.toggle('hidden', !isFunds);
   $('binanceDash').classList.toggle('hidden', !isBinance);
   $('achvDash').classList.toggle('hidden', !isAchv);
   // Her sekme kendi menusunu gosterir; Genel'de Nakit Duzenleme menusu gosterilir.
@@ -1416,6 +1424,7 @@ function switchDash(which) {
   $('metalMenu').classList.toggle('hidden', !isMetal);
   $('currencyMenu').classList.toggle('hidden', !isCurrency);
   $('cryptoMenu').classList.toggle('hidden', !isCrypto);
+  $('fundsMenu').classList.toggle('hidden', !isFunds);
   $('tabGenel').classList.toggle('active', isGenel);
   $('tabBist').classList.toggle('active', isBist);
   $('tabFund').classList.toggle('active', isFund);
@@ -1423,6 +1432,7 @@ function switchDash(which) {
   $('tabMetal').classList.toggle('active', isMetal);
   $('tabCurrency').classList.toggle('active', isCurrency);
   $('tabCrypto').classList.toggle('active', isCrypto);
+  $('tabFunds').classList.toggle('active', isFunds);
   $('tabBinance').classList.toggle('active', isBinance);
   $('tabAchv').classList.toggle('active', isAchv);
   if (isFund) fundLoad();
@@ -1430,6 +1440,7 @@ function switchDash(which) {
   if (isMetal) metalRefreshAll();
   if (isCurrency) currencyRefreshAll();
   if (isCrypto) cryptoRefreshAll();
+  if (isFunds) fundsRefreshAll();
   if (isBinance) binanceLoad();
   if (isAchv) achievementsLoad();
   if (isGenel) genelLoadSummary();
@@ -1441,6 +1452,7 @@ $('tabUs').addEventListener('click', () => switchDash('us'));
 $('tabMetal').addEventListener('click', () => switchDash('metal'));
 $('tabCurrency').addEventListener('click', () => switchDash('currency'));
 $('tabCrypto').addEventListener('click', () => switchDash('crypto'));
+$('tabFunds').addEventListener('click', () => switchDash('funds'));
 $('tabBinance').addEventListener('click', () => switchDash('binance'));
 $('tabAchv').addEventListener('click', () => switchDash('achv'));
 
@@ -1451,12 +1463,13 @@ document.querySelectorAll('#genelDash .card[data-goto]').forEach((c) =>
 
 // Genel sekmesi: BIST toplam varligi + ABD guncel TL degeri + kiymetli maden TL degeri => toplam butce
 async function genelLoadSummary() {
-  const [b, u, m, c, cy, cash, bn] = await Promise.all([
+  const [b, u, m, c, cy, fn, cash, bn] = await Promise.all([
     api('/api/summary'),
     api('/api/us/summary'),
     api('/api/metal/summary'),
     api('/api/currency/summary'),
     api('/api/crypto/summary'),
+    api('/api/funds/summary'),
     api('/api/cash-holdings/summary'),
     api('/api/binance/total'),
   ]);
@@ -1465,6 +1478,7 @@ async function genelLoadSummary() {
   const metalValue = m.totalValue != null ? m.totalValue : null;
   const currencyValue = c.totalValue != null ? c.totalValue : null;
   const cryptoValue = cy.totalValueTRY != null ? cy.totalValueTRY : null;
+  const fundsValue = fn.totalValue != null ? fn.totalValue : null;
   const cashValue = cash.totalTRY != null ? cash.totalTRY : null;
   const binanceValue = bn.totalTRY != null ? bn.totalTRY : null;
   $('genBist').textContent = bistAssets != null ? tl(bistAssets) : '—';
@@ -1472,6 +1486,7 @@ async function genelLoadSummary() {
   $('genMetal').textContent = metalValue != null ? tl(metalValue) : '—';
   $('genCurrency').textContent = currencyValue != null ? tl(currencyValue) : '—';
   $('genCrypto').textContent = cryptoValue != null ? tl(cryptoValue) : '—';
+  $('genFunds').textContent = fundsValue != null ? tl(fundsValue) : '—';
   $('genCash').textContent = cashValue != null ? tl(cashValue) : '—';
   $('genBinance').textContent = binanceValue != null ? tl(binanceValue) : '—';
   $('genBinanceAt').textContent = bn.at ? `Son: ${new Date(bn.at).toLocaleTimeString('tr-TR')}` : (bn.hasKeys === false ? 'Anahtar yok' : '');
@@ -1482,6 +1497,7 @@ async function genelLoadSummary() {
   pctSub('genMetalPct', m.totalProfit, m.totalCost);
   pctSub('genCurrencyPct', c.totalProfit, c.totalCost);
   pctSub('genCryptoPct', cy.totalProfitUSD, cy.totalCostUSD);
+  pctSub('genFundsPct', fn.totalProfit, fn.totalCost);
   // Toplam butce K/Z: maliyet+kar verisi olan siniflarin TL bazli toplami
   let aggProfit = 0, aggCost = 0;
   const addAgg = (p, cost) => { if (p != null && cost > 0) { aggProfit += p; aggCost += cost; } };
@@ -1490,8 +1506,9 @@ async function genelLoadSummary() {
   addAgg(m.totalProfit, m.totalCost);
   addAgg(c.totalProfit, c.totalCost);
   addAgg(cy.totalProfitTRY, cy.totalCostTRY);
+  addAgg(fn.totalProfit, fn.totalCost);
 
-  const total = (bistAssets || 0) + (usValueTry || 0) + (metalValue || 0) + (currencyValue || 0) + (cryptoValue || 0) + (cashValue || 0) + (binanceValue || 0);
+  const total = (bistAssets || 0) + (usValueTry || 0) + (metalValue || 0) + (currencyValue || 0) + (cryptoValue || 0) + (fundsValue || 0) + (cashValue || 0) + (binanceValue || 0);
   // Toplam butce; dolar karsiligi alt satirda
   const usdRate = cash.usdRate || (cy.rate || null);
   $('genTotal').textContent = tl(total);
@@ -1505,6 +1522,7 @@ async function genelLoadSummary() {
       { name: 'Kıymetli Maden', value: metalValue || 0, color: '#d29922' },
       { name: 'Döviz', value: currencyValue || 0, color: '#a371f7' },
       { name: 'Kripto', value: cryptoValue || 0, color: '#f0883e' },
+      { name: 'Fon', value: fundsValue || 0, color: '#db61a2' },
       { name: 'Nakit', value: cashValue || 0, color: '#39c5cf' },
       { name: 'Binance', value: binanceValue || 0, color: '#f3ba2f' },
     ],
@@ -2628,6 +2646,208 @@ $('binanceKeyForm').addEventListener('submit', async (e) => {
   }
 });
 $('bnRefresh').addEventListener('click', binanceLoadPortfolio);
+
+// ===================== TEFAS FON (alim) =====================
+// Fon birim fiyatlari 6 ondalik gosterilir
+const fprice = (n) => '₺' + new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 6, maximumFractionDigits: 6 }).format(Number(n) || 0);
+
+async function fundsRefreshAll() {
+  await Promise.all([fundsLoadSummary(), fundsLoadPrices(), fundsLoadPurchases()]);
+}
+
+async function fundsLoadSummary() {
+  const s = await api('/api/funds/summary');
+  $('fnCardCost').textContent = tl(s.totalCost);
+  $('fnCardValue').textContent = s.totalValue != null ? tl(s.totalValue) : '—';
+  if (s.totalProfit != null) {
+    const cls = s.totalProfit >= 0 ? 'pos' : 'neg';
+    $('fnCardProfit').textContent = tl(s.totalProfit);
+    $('fnCardProfit').className = 'card-value ' + cls;
+    const pct = s.totalCost > 0 ? ((s.totalProfit / s.totalCost) * 100).toFixed(2) : '0';
+    $('fnCardProfitPct').textContent = `%${pct}`;
+    $('fnCardProfitPct').className = 'card-sub ' + cls;
+  } else {
+    $('fnCardProfit').textContent = '—';
+    $('fnCardProfit').className = 'card-value';
+    $('fnCardProfitPct').textContent = 'Fiyat girilmemiş';
+    $('fnCardProfitPct').className = 'card-sub';
+  }
+
+  const tb = $('fundsHoldingsTable').querySelector('tbody');
+  if (!s.holdings.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="8">Henüz fon yok</td></tr>';
+    return;
+  }
+  tb.innerHTML = s.holdings
+    .map((h) => {
+      const pl = h.profit != null
+        ? `<span class="${h.profit >= 0 ? 'pos' : 'neg'}">${tl(h.profit)}${h.profitPct != null ? ` (%${h.profitPct.toFixed(1)})` : ''}</span>`
+        : '<span class="muted">—</span>';
+      return `<tr>
+        <td><strong>${esc(h.code)}</strong></td>
+        <td class="muted">${esc(h.title || '')}</td>
+        <td class="num">${num(h.quantity)}</td>
+        <td class="num">${fprice(h.avgCost)}</td>
+        <td class="num">${h.currentPrice != null ? fprice(h.currentPrice) : '<span class="muted">—</span>'}</td>
+        <td class="num">${tl(h.costBasis)}</td>
+        <td class="num">${h.currentValue != null ? tl(h.currentValue) : '<span class="muted">—</span>'}</td>
+        <td class="num">${pl}</td>
+      </tr>`;
+    })
+    .join('');
+}
+
+async function fundsLoadPrices() {
+  const rows = await api('/api/funds/prices');
+  const tb = $('fundsPricesTable').querySelector('tbody');
+  tb.innerHTML = rows.length
+    ? rows
+        .map(
+          (r) => `<tr>
+        <td><strong>${esc(r.code)}</strong></td>
+        <td class="muted">${esc(r.title || '')}</td>
+        <td class="num">${r.price > 0 ? fprice(r.price) : '<span class="muted">—</span>'}</td>
+        <td class="muted">${r.updated_at ? new Date(r.updated_at).toLocaleString('tr-TR') : '—'}</td>
+      </tr>`
+        )
+        .join('')
+    : '<tr class="empty-row"><td colspan="4">Fiyat verisi yok</td></tr>';
+}
+
+let fundsPurchaseCache = [];
+let fundsPurchasePage = 1;
+async function fundsLoadPurchases() {
+  fundsPurchaseCache = await api('/api/funds/purchases');
+  fundsRenderPurchases();
+}
+function fundsRenderPurchases() {
+  const rows = fundsPurchaseCache;
+  const tb = $('fundsPurchasesTable').querySelector('tbody');
+  if (!rows.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="6">Kayıt yok</td></tr>';
+    renderPager('fundsPurchasesPager', 1, 0, () => {});
+    return;
+  }
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if (fundsPurchasePage > pages) fundsPurchasePage = pages;
+  const pageRows = rows.slice((fundsPurchasePage - 1) * PAGE_SIZE, fundsPurchasePage * PAGE_SIZE);
+  tb.innerHTML = pageRows
+    .map(
+      (r) => `<tr>
+        <td>${r.trade_date.slice(0, 10)}</td>
+        <td><strong>${esc(r.code)}</strong></td>
+        <td class="num">${num(r.quantity)}</td>
+        <td class="num">${fprice(r.price)}</td>
+        <td class="num">${tl(r.total)}</td>
+        <td><div class="row-actions">
+          <button class="edit-btn" data-edit-fn="${r.id}" title="Düzenle">✏️</button>
+          <button class="del-btn" data-del-fn="${r.id}" title="Sil">🗑</button>
+        </div></td>
+      </tr>`
+    )
+    .join('');
+  tb.querySelectorAll('[data-edit-fn]').forEach((b) =>
+    b.addEventListener('click', () => fundsOpenPurchaseModal(fundsPurchaseCache.find((x) => x.id == b.dataset.editFn)))
+  );
+  tb.querySelectorAll('[data-del-fn]').forEach((b) =>
+    b.addEventListener('click', () => fundsDelPurchase(b.dataset.delFn))
+  );
+  renderPager('fundsPurchasesPager', fundsPurchasePage, rows.length, (p) => { fundsPurchasePage = p; fundsRenderPurchases(); });
+}
+
+async function fundsDelPurchase(id) {
+  if (!confirm('Bu kayıt silinsin mi?')) return;
+  await api(`/api/funds/purchases/${id}`, { method: 'DELETE' });
+  fundsRefreshAll();
+}
+
+// ---- Fon alım modalı ----
+let fundsBeforeTimer = null;
+function fundsOpenPurchaseModal(row) {
+  $('fundsPurchaseForm').reset();
+  $('fnPError').classList.add('hidden');
+  if (row) {
+    $('fundsPurchaseTitle').textContent = 'Fon Alım Düzenle';
+    $('fnPId').value = row.id;
+    $('fnPDate').value = row.trade_date.slice(0, 10);
+    $('fnPCode').value = row.code;
+    $('fnPTitle').value = '';
+    $('fnPQty').value = row.quantity;
+    $('fnPPrice').value = row.price;
+  } else {
+    $('fundsPurchaseTitle').textContent = 'Fon Alım Ekle';
+    $('fnPId').value = '';
+    $('fnPDate').value = todayStr();
+    $('fnPCode').value = localStorage.getItem('fundsLastCode') || '';
+  }
+  fundsUpdateCalc();
+  fundsUpdateBeforeInfo();
+  openModal('fundsPurchaseModal');
+  focusDate('fnPDate');
+}
+$('fundsOpenPurchase').addEventListener('click', () => fundsOpenPurchaseModal(null));
+
+function fundsUpdateCalc() {
+  const qty = Number($('fnPQty').value) || 0;
+  const price = Number($('fnPPrice').value) || 0;
+  $('fnPTotal').textContent = tl(qty * price);
+}
+
+function fundsResetBeforeInfo() {
+  const box = $('fnPBeforeInfo');
+  box.classList.remove('has-data');
+  box.innerHTML = 'Fon ve tarih girin; bu tarihten önceki durum burada gösterilir. Yeni fon eklenince otomatik takibe alınır.';
+}
+async function fundsUpdateBeforeInfo() {
+  const code = $('fnPCode').value.trim();
+  const date = $('fnPDate').value;
+  const box = $('fnPBeforeInfo');
+  if (!code || !date) return fundsResetBeforeInfo();
+  try {
+    const h = await api(`/api/funds/holdings-before?code=${encodeURIComponent(code)}&date=${date}`);
+    if (h.quantity > 0) {
+      box.classList.add('has-data');
+      box.innerHTML = `<strong>${esc(h.code)}</strong> — ${date} öncesi: <strong>${num(h.quantity)}</strong> pay, ort. maliyet <strong>${fprice(h.avgCost)}</strong>`;
+    } else {
+      box.classList.remove('has-data');
+      box.innerHTML = `<strong>${esc(h.code)}</strong> — bu tarihten önce pozisyon yok (ilk alım).`;
+    }
+  } catch {
+    fundsResetBeforeInfo();
+  }
+}
+
+['fnPQty', 'fnPPrice'].forEach((id) => $(id).addEventListener('input', fundsUpdateCalc));
+['fnPCode', 'fnPDate'].forEach((id) =>
+  $(id).addEventListener('input', () => {
+    clearTimeout(fundsBeforeTimer);
+    fundsBeforeTimer = setTimeout(fundsUpdateBeforeInfo, 350);
+  })
+);
+
+$('fundsPurchaseForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('fnPError');
+  err.classList.add('hidden');
+  const id = $('fnPId').value;
+  const code = $('fnPCode').value.trim().toUpperCase();
+  const body = JSON.stringify({
+    trade_date: $('fnPDate').value,
+    code,
+    title: $('fnPTitle').value || '',
+    quantity: $('fnPQty').value,
+    price: $('fnPPrice').value,
+  });
+  try {
+    await api(id ? `/api/funds/purchases/${id}` : '/api/funds/purchases', { method: id ? 'PUT' : 'POST', body });
+    if (code) localStorage.setItem('fundsLastCode', code);
+    closeModal('fundsPurchaseModal');
+    fundsRefreshAll();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
 
 // ===================== TELEGRAM BILDIRIM AYARLARI =====================
 async function openTelegram() {

@@ -226,6 +226,28 @@ CREATE TABLE IF NOT EXISTS crypto_prices (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- ===================== TEFAS FON fiyatlari (ORTAK; servis doldurur) =====================
+-- Anlik pay fiyati (TL). Fon kodu bazli; servis TEFAS'tan cekip buraya yazar.
+CREATE TABLE IF NOT EXISTS fund_prices (
+  code        TEXT PRIMARY KEY,                               -- fon kodu (orn 'AFA')
+  title       TEXT,                                           -- fon adi/unvani
+  price       NUMERIC(18,6) NOT NULL CHECK (price >= 0),      -- anlik pay fiyati (TL)
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- TEFAS fon alimlari (kullaniciya ozel). Komisyon yok; TL bazli.
+CREATE TABLE IF NOT EXISTS fund_purchases (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  trade_date  DATE NOT NULL,
+  code        TEXT NOT NULL,                                  -- fon kodu
+  quantity    NUMERIC(24,6) NOT NULL CHECK (quantity > 0),    -- pay adedi
+  price       NUMERIC(18,6) NOT NULL CHECK (price >= 0),      -- TL / pay (alis)
+  total       NUMERIC(20,4) NOT NULL,                         -- TL (adet * fiyat)
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_fund_purchases_user ON fund_purchases(user_id, code);
+
 -- Elde tutulan nakit (kullanici basina tek satir; TL/EUR/USD). Genel panoda kullanilir.
 CREATE TABLE IF NOT EXISTS cash_holdings (
   user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -431,6 +453,19 @@ DROP TRIGGER IF EXISTS crypto_prices_notify ON crypto_prices;
 CREATE TRIGGER crypto_prices_notify
   AFTER INSERT OR UPDATE OR DELETE ON crypto_prices
   FOR EACH STATEMENT EXECUTE PROCEDURE notify_crypto_price_change();
+
+-- fund_prices degisince (servis yazinca) fon panosunu guncelle
+CREATE OR REPLACE FUNCTION notify_fund_price_change() RETURNS trigger AS $$
+BEGIN
+  PERFORM pg_notify('fund_price_change', '');
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS fund_prices_notify ON fund_prices;
+CREATE TRIGGER fund_prices_notify
+  AFTER INSERT OR UPDATE OR DELETE ON fund_prices
+  FOR EACH STATEMENT EXECUTE PROCEDURE notify_fund_price_change();
 `;
 
 async function migrate() {

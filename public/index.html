@@ -54,6 +54,9 @@
       <div id="cryptoMenu" class="hidden">
         <button class="btn primary block" id="cryptoOpenPurchase">+ Kripto Alım Ekle</button>
       </div>
+      <div id="fundsMenu" class="hidden">
+        <button class="btn primary block" id="fundsOpenPurchase">+ Fon Alım Ekle</button>
+      </div>
       <button class="btn block hidden" id="openUsers">👥 Kullanıcılar</button>
       <button class="btn block" id="openTelegram">🔔 Bildirim Ayarları</button>
       <button class="btn block" id="openChangePw">🔑 Parola Değiştir</button>
@@ -76,6 +79,7 @@
         <button class="tab" id="tabMetal">🥇 Kıymetli Maden</button>
         <button class="tab" id="tabCurrency">💱 Döviz</button>
         <button class="tab" id="tabCrypto">🪙 Kripto</button>
+        <button class="tab" id="tabFunds">🧺 Fon</button>
         <button class="tab" id="tabBinance">🟡 Binance</button>
         <button class="tab" id="tabAchv">🏅 Başarımlar</button>
       </div>
@@ -106,6 +110,11 @@
           <div class="card-label">Kripto Değeri (TL)</div>
           <div class="card-value" id="genCrypto">—</div>
           <div class="card-sub" id="genCryptoPct"></div>
+        </div>
+        <div class="card clickable" data-goto="funds" title="Fon'a git">
+          <div class="card-label">Fon Değeri (TL)</div>
+          <div class="card-value" id="genFunds">—</div>
+          <div class="card-sub" id="genFundsPct"></div>
         </div>
         <div class="card clickable" id="genCashCard" title="Nakit Düzenleme">
           <div class="card-label">Nakit (TL Karşılığı)</div>
@@ -642,6 +651,73 @@
           <div class="pager" id="cryptoPurchasesPager"></div>
         </section>
       </div><!-- /cryptoDash -->
+
+      <!-- ===================== TEFAS FON DASHBOARD ===================== -->
+      <div id="fundsDash" class="hidden">
+        <section class="cards">
+          <div class="card">
+            <div class="card-label">Toplam Maliyet (₺)</div>
+            <div class="card-value" id="fnCardCost">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Güncel Değer (₺)</div>
+            <div class="card-value" id="fnCardValue">—</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Kâr / Zarar (₺)</div>
+            <div class="card-value" id="fnCardProfit">—</div>
+            <div class="card-sub" id="fnCardProfitPct"></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h3>Fonlar</h3>
+          <div class="table-wrap">
+            <table id="fundsHoldingsTable">
+              <thead>
+                <tr>
+                  <th>Kod</th><th>Ad</th><th class="num">Adet</th>
+                  <th class="num">Ort. Maliyet</th><th class="num">Güncel Fiyat</th>
+                  <th class="num">Maliyet (₺)</th><th class="num">Değer (₺)</th><th class="num">K/Z (₺)</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div class="two-col">
+          <section class="panel">
+            <h3>Güncel Fon Fiyatları</h3>
+            <div class="table-wrap">
+              <table id="fundsPricesTable" class="compact">
+                <thead><tr><th>Kod</th><th>Ad</th><th class="num">Fiyat (₺)</th><th>Güncelleme</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="panel">
+            <h3>Bilgi</h3>
+            <div class="info-box">Fon fiyatları TEFAS'tan servis tarafından çekilir. Yeni bir fon eklediğinizde otomatik olarak takibe alınır; ilk fiyat gelene kadar "—" görünür. Fiyat güncellenince ekran otomatik yenilenir.</div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <h3>Fon Alım Geçmişi</h3>
+          <div class="table-wrap">
+            <table id="fundsPurchasesTable">
+              <thead>
+                <tr>
+                  <th>Tarih</th><th>Kod</th><th class="num">Adet</th>
+                  <th class="num">Alış (₺)</th><th class="num">Toplam (₺)</th><th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="pager" id="fundsPurchasesPager"></div>
+        </section>
+      </div><!-- /fundsDash -->
 
       <!-- ===================== BINANCE DASHBOARD ===================== -->
       <div id="binanceDash" class="hidden">
@@ -1183,6 +1259,43 @@
         <button type="submit" class="btn primary">Kaydet</button>
       </div>
       <div class="error hidden" id="cyPError"></div>
+    </form>
+  </div>
+
+  <!-- TEFAS FON ALIM EKLE / DUZENLE MODAL -->
+  <div id="fundsPurchaseModal" class="modal hidden">
+    <form class="modal-card" id="fundsPurchaseForm">
+      <input type="hidden" id="fnPId" />
+      <div class="modal-head">
+        <h3 id="fundsPurchaseTitle">Fon Alım Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="fnPDate" lang="tr" required />
+        </label>
+        <label>Fon Kodu
+          <input type="text" id="fnPCode" placeholder="örn. AFA" required style="text-transform:uppercase" />
+        </label>
+        <label class="full">Fon Adı (opsiyonel)
+          <input type="text" id="fnPTitle" placeholder="örn. Ak Portföy ... Fonu" />
+        </label>
+        <label>Adet (pay)
+          <input type="number" id="fnPQty" step="any" min="0" required />
+        </label>
+        <label>Alış Fiyatı (₺/pay)
+          <input type="number" id="fnPPrice" step="any" min="0" required />
+        </label>
+      </div>
+      <div class="calc-box">
+        <div><span>Toplam Maliyet:</span> <strong id="fnPTotal">₺0,00</strong></div>
+      </div>
+      <div class="info-box" id="fnPBeforeInfo">Fon ve tarih girin; bu tarihten önceki durum burada gösterilir. Yeni fon eklenince otomatik takibe alınır.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="fnPError"></div>
     </form>
   </div>
 
