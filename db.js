@@ -301,6 +301,7 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
   crypto      NUMERIC(20,4) NOT NULL DEFAULT 0,
   cash        NUMERIC(20,4) NOT NULL DEFAULT 0,
   binance     NUMERIC(20,4) NOT NULL DEFAULT 0,
+  fund        NUMERIC(20,4) NOT NULL DEFAULT 0,
   usd_rate    NUMERIC(18,6),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, snap_date)
@@ -333,6 +334,9 @@ END$$;
 
 -- ABD alimlarda komisyon SABIT USD (yuzde/bsmv yok)
 ALTER TABLE us_purchases ADD COLUMN IF NOT EXISTS commission NUMERIC(18,6) NOT NULL DEFAULT 0;
+
+-- Snapshot tablosuna fon degeri (eski kayitlar 0 kabul edilir)
+ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS fund NUMERIC(20,4) NOT NULL DEFAULT 0;
 
 -- Gecmisi olmayan kullanicilar icin mevcut parolayi gecmise tohumla
 INSERT INTO password_history (user_id, password)

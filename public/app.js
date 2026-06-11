@@ -618,6 +618,48 @@ async function genelLoadChart() {
     series = await api('/api/snapshots');
   } catch (_) {}
   renderBudgetChart(series);
+  renderCardSparks(series);
+}
+
+// Her kartin altindaki kucuk gidisat grafigi (sparkline). Kaynak: gunluk snapshot serisi.
+// key -> snapshot alani, color -> pasta grafigindeki renkle ayni.
+const SPARK_DEFS = [
+  { id: 'spkBist', key: 'bist', color: '#2f81f7' },
+  { id: 'spkUs', key: 'us', color: '#3fb950' },
+  { id: 'spkMetal', key: 'metal', color: '#d29922' },
+  { id: 'spkCurrency', key: 'currency', color: '#a371f7' },
+  { id: 'spkCrypto', key: 'crypto', color: '#f0883e' },
+  { id: 'spkFunds', key: 'fund', color: '#db61a2' },
+  { id: 'spkCash', key: 'cash', color: '#39c5cf' },
+  { id: 'spkBinance', key: 'binance', color: '#f3ba2f' },
+  { id: 'spkTotal', key: 'total', color: '#2f81f7' },
+];
+
+function renderCardSparks(series) {
+  SPARK_DEFS.forEach((d) => renderSpark(d.id, series, d.key, d.color));
+}
+
+function renderSpark(boxId, series, key, color) {
+  const box = $(boxId);
+  if (!box) return;
+  const pts = (series || []).map((s) => Number(s[key]) || 0);
+  if (pts.length < 2) {
+    box.innerHTML = '<div class="spark-empty">Veri birikiyor…</div>';
+    return;
+  }
+  const W = 240, H = 36, pad = 3;
+  let min = Math.min(...pts), max = Math.max(...pts);
+  if (min === max) { min = min === 0 ? 0 : min * 0.999; max = max === 0 ? 1 : max * 1.001; }
+  const X = (i) => pad + (i / (pts.length - 1)) * (W - pad * 2);
+  const Y = (v) => pad + (H - pad * 2) - ((v - min) / (max - min)) * (H - pad * 2);
+  const line = pts.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+  const area = `${line} L${X(pts.length - 1).toFixed(1)},${(H - pad).toFixed(1)} L${X(0).toFixed(1)},${(H - pad).toFixed(1)} Z`;
+  const lx = X(pts.length - 1).toFixed(1), ly = Y(pts[pts.length - 1]).toFixed(1);
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+    <path d="${area}" fill="${color}" fill-opacity="0.12"/>
+    <path d="${line}" fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+    <circle cx="${lx}" cy="${ly}" r="2.4" fill="${color}" vector-effect="non-scaling-stroke"/>
+  </svg>`;
 }
 
 function renderBudgetChart(series) {

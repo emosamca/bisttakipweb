@@ -1419,12 +1419,13 @@ function pctStr(profit, cost) {
 
 // Genel pano toplamlarini sunucu tarafinda hesapla (Telegram ozeti icin)
 async function computeGenelTotals(userId) {
-  const [b, u, m, c, cy] = await Promise.all([
+  const [b, u, m, c, cy, fnd] = await Promise.all([
     portfolio.summary(userId),
     usportfolio.summary(userId),
     metalportfolio.summary(userId),
     currencyportfolio.summary(userId),
     cryptoportfolio.summary(userId),
+    fundsportfolio.summary(userId),
   ]);
   const cashRow =
     (await db.query('SELECT try_amount, eur_amount, usd_amount FROM cash_holdings WHERE user_id=$1', [userId])).rows[0] ||
@@ -1441,8 +1442,9 @@ async function computeGenelTotals(userId) {
   const metal = m.totalValue != null ? m.totalValue : 0;
   const curr = c.totalValue != null ? c.totalValue : 0;
   const crypto = cy.totalValueTRY != null ? cy.totalValueTRY : 0;
-  const total = bist + us + metal + curr + crypto + cashTRY + binance;
-  return { b, u, m, c, cy, bist, us, metal, curr, crypto, cashTRY, binance, total, usdRate };
+  const fundVal = fnd.totalValue != null ? fnd.totalValue : 0;
+  const total = bist + us + metal + curr + crypto + cashTRY + binance + fundVal;
+  return { b, u, m, c, cy, fnd, bist, us, metal, curr, crypto, cashTRY, binance, fund: fundVal, total, usdRate };
 }
 
 async function buildDailySummaryText(userId) {
@@ -1457,6 +1459,7 @@ async function buildDailySummaryText(userId) {
     `🥇 Maden: <b>${tlFmt(g.metal)}</b>${pctStr(g.m.totalProfit, g.m.totalCost)}`,
     `💱 Döviz: <b>${tlFmt(g.curr)}</b>${pctStr(g.c.totalProfit, g.c.totalCost)}`,
     `🪙 Kripto: <b>${tlFmt(g.crypto)}</b>${pctStr(g.cy.totalProfitUSD, g.cy.totalCostUSD)}`,
+    `🟣 Fon: <b>${g.fund ? tlFmt(g.fund) : '—'}</b>${pctStr(g.fnd.totalProfit, g.fnd.totalCost)}`,
     `💵 Nakit: <b>${tlFmt(g.cashTRY)}</b>`,
     `🟡 Binance: <b>${g.binance ? tlFmt(g.binance) : '—'}</b>`,
     '━━━━━━━━━━',
@@ -1483,13 +1486,13 @@ async function writeDailySnapshots() {
       const g = await computeGenelTotals(u.id);
       await db.query(
         `INSERT INTO portfolio_snapshots
-           (user_id, snap_date, total_try, bist, us, metal, currency, crypto, cash, binance, usd_rate)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           (user_id, snap_date, total_try, bist, us, metal, currency, crypto, cash, binance, fund, usd_rate)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
          ON CONFLICT (user_id, snap_date) DO UPDATE SET
            total_try=EXCLUDED.total_try, bist=EXCLUDED.bist, us=EXCLUDED.us, metal=EXCLUDED.metal,
            currency=EXCLUDED.currency, crypto=EXCLUDED.crypto, cash=EXCLUDED.cash,
-           binance=EXCLUDED.binance, usd_rate=EXCLUDED.usd_rate`,
-        [u.id, today, g.total, g.bist, g.us, g.metal, g.curr, g.crypto, g.cashTRY, g.binance, g.usdRate]
+           binance=EXCLUDED.binance, fund=EXCLUDED.fund, usd_rate=EXCLUDED.usd_rate`,
+        [u.id, today, g.total, g.bist, g.us, g.metal, g.curr, g.crypto, g.cashTRY, g.binance, g.fund, g.usdRate]
       );
     } catch (e) {
       console.error('snapshot hata (user ' + u.id + '):', e.message);
@@ -1539,6 +1542,7 @@ async function buildWeeklySummaryText(userId) {
     `🥇 Maden: <b>${tlFmt(g.metal)}</b>${deltaStr(g.metal, base.metal)}`,
     `💱 Döviz: <b>${tlFmt(g.curr)}</b>${deltaStr(g.curr, base.currency)}`,
     `🪙 Kripto: <b>${tlFmt(g.crypto)}</b>${deltaStr(g.crypto, base.crypto)}`,
+    `🟣 Fon: <b>${g.fund ? tlFmt(g.fund) : '—'}</b>${g.fund ? deltaStr(g.fund, base.fund || 0) : ''}`,
     `💵 Nakit: <b>${tlFmt(g.cashTRY)}</b>${deltaStr(g.cashTRY, base.cash)}`,
     `🟡 Binance: <b>${g.binance ? tlFmt(g.binance) : '—'}</b>${g.binance ? deltaStr(g.binance, base.binance) : ''}`,
     '━━━━━━━━━━',
@@ -1551,10 +1555,24 @@ async function buildWeeklySummaryText(userId) {
 app.get('/api/snapshots', requireAuth, async (req, res) => {
   try {
     const r = await db.query(
-      'SELECT snap_date, total_try FROM portfolio_snapshots WHERE user_id=$1 ORDER BY snap_date ASC',
+      `SELECT snap_date, total_try, bist, us, metal, currency, crypto, cash, binance, fund
+         FROM portfolio_snapshots WHERE user_id=$1 ORDER BY snap_date ASC`,
       [req.session.userId]
     );
-    res.json(r.rows.map((x) => ({ date: x.snap_date, total: Number(x.total_try) })));
+    res.json(
+      r.rows.map((x) => ({
+        date: x.snap_date,
+        total: Number(x.total_try),
+        bist: Number(x.bist),
+        us: Number(x.us),
+        metal: Number(x.metal),
+        currency: Number(x.currency),
+        crypto: Number(x.crypto),
+        cash: Number(x.cash),
+        binance: Number(x.binance),
+        fund: Number(x.fund),
+      }))
+    );
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Alinamadi' });
