@@ -615,37 +615,81 @@ function renderGenelPie(items, total) {
 }
 
 // ---- Genel: Toplam Butce zaman grafigi (gunluk snapshot'lardan) ----
-async function genelLoadChart() {
+async function genelLoadChart(liveTotals) {
   let series = [];
   try {
     series = await api('/api/snapshots');
   } catch (_) {}
   renderBudgetChart(series);
-  renderCardSparks(series);
+  renderCardSparks(series, liveTotals);
+  renderSnapIndicators(series, liveTotals);
+}
+
+// Kart degerinin yaninda son snapshot'a gore yon gostergesi:
+// arttiysa yesil yukari ok, azaldiysa kirmizi asagi ok, ayni ise mavi yuvarlak.
+function renderSnapIndicators(series, liveTotals) {
+  if (!liveTotals) return;
+  const last = (series || [])[series.length - 1];
+  SPARK_DEFS.forEach((d) => {
+    const el = $(d.valId);
+    if (!el) return;
+    const old = el.querySelector('.snap-ind');
+    if (old) old.remove();
+    const cur = liveTotals[d.key];
+    if (cur == null || !last) return;
+    const prev = Number(last[d.key]);
+    if (!Number.isFinite(prev)) return;
+    const diff = Number(cur) - prev;
+    // %0.01 (veya min 0.005 TL) altindaki farki "ayni" kabul et
+    const eps = Math.max(Math.abs(prev) * 0.0001, 0.005);
+    let cls, sym;
+    if (diff > eps) { cls = 'up'; sym = '▲'; }
+    else if (diff < -eps) { cls = 'down'; sym = '▼'; }
+    else { cls = 'flat'; sym = '●'; }
+    // Fark metni: sembolsuz, ondaliksiz, isaretli (orn: +100 / -134). Ayni ise 0.
+    const diffTxt =
+      cls === 'flat'
+        ? '0'
+        : (diff >= 0 ? '+' : '-') +
+          new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 0 }).format(Math.abs(diff));
+    const span = document.createElement('span');
+    span.className = 'snap-ind ' + cls;
+    span.textContent = `${sym} ${diffTxt}`;
+    span.title = `Son snapshot: ${tl(prev)}  (Δ ${diff >= 0 ? '+' : '-'}${tl(Math.abs(diff))})`;
+    el.appendChild(span);
+  });
 }
 
 // Her kartin altindaki kucuk gidisat grafigi (sparkline). Kaynak: gunluk snapshot serisi.
 // key -> snapshot alani, color -> pasta grafigindeki renkle ayni.
 const SPARK_DEFS = [
-  { id: 'spkBist', key: 'bist', color: '#2f81f7' },
-  { id: 'spkUs', key: 'us', color: '#3fb950' },
-  { id: 'spkMetal', key: 'metal', color: '#d29922' },
-  { id: 'spkCurrency', key: 'currency', color: '#a371f7' },
-  { id: 'spkCrypto', key: 'crypto', color: '#f0883e' },
-  { id: 'spkFunds', key: 'fund', color: '#db61a2' },
-  { id: 'spkCash', key: 'cash', color: '#39c5cf' },
-  { id: 'spkBinance', key: 'binance', color: '#f3ba2f' },
-  { id: 'spkTotal', key: 'total', color: '#2f81f7' },
+  { id: 'spkBist', key: 'bist', color: '#2f81f7', valId: 'genBist' },
+  { id: 'spkUs', key: 'us', color: '#3fb950', valId: 'genUs' },
+  { id: 'spkMetal', key: 'metal', color: '#d29922', valId: 'genMetal' },
+  { id: 'spkCurrency', key: 'currency', color: '#a371f7', valId: 'genCurrency' },
+  { id: 'spkCrypto', key: 'crypto', color: '#f0883e', valId: 'genCrypto' },
+  { id: 'spkFunds', key: 'fund', color: '#db61a2', valId: 'genFunds' },
+  { id: 'spkCash', key: 'cash', color: '#39c5cf', valId: 'genCash' },
+  { id: 'spkBinance', key: 'binance', color: '#f3ba2f', valId: 'genBinance' },
+  { id: 'spkTotal', key: 'total', color: '#2f81f7', valId: 'genTotal' },
 ];
 
-function renderCardSparks(series) {
-  SPARK_DEFS.forEach((d) => renderSpark(d.id, series, d.key, d.color));
+function renderCardSparks(series, liveTotals) {
+  SPARK_DEFS.forEach((d) =>
+    renderSpark(d.id, series, d.key, d.color, liveTotals ? liveTotals[d.key] : null)
+  );
 }
 
-function renderSpark(boxId, series, key, color) {
+function renderSpark(boxId, series, key, color, liveVal) {
   const box = $(boxId);
   if (!box) return;
   const pts = (series || []).map((s) => Number(s[key]) || 0);
+  // Canli degeri her zaman son snapshot'in ARKASINA yeni nokta olarak ekle.
+  // Boylece son snapshot grafikte kalir, anlik deger ona gore yukseliyor mu
+  // dusuyor mu gorunur (snapshot'i degistirmiyoruz).
+  if (liveVal != null && Number.isFinite(Number(liveVal))) {
+    pts.push(Number(liveVal));
+  }
   if (pts.length < 2) {
     box.innerHTML = '<div class="spark-empty">Veri birikiyor…</div>';
     return;
@@ -1567,6 +1611,19 @@ async function genelLoadSummary() {
   $('genTotalUsd').innerHTML = `<span>${usdStr}</span>${ngStr}`;
   pctSub('genTotalPct', aggCost > 0 ? aggProfit : null, aggCost);
 
+  // Kart sparkline'lari icin canli kategori toplamlari (SPARK_DEFS key'leriyle ayni)
+  const liveTotals = {
+    bist: bistAssets,
+    us: usValueTry,
+    metal: metalValue,
+    currency: currencyValue,
+    crypto: cryptoValue,
+    fund: fundsValue,
+    cash: cashValue,
+    binance: binanceValue,
+    total,
+  };
+
   renderGenelPie(
     [
       { name: 'BIST', value: bistAssets || 0, color: '#2f81f7' },
@@ -1581,7 +1638,7 @@ async function genelLoadSummary() {
     total
   );
 
-  genelLoadChart();
+  genelLoadChart(liveTotals);
 }
 function maybeRefreshGenel() {
   if (!$('genelDash').classList.contains('hidden')) genelLoadSummary();

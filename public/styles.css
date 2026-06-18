@@ -108,6 +108,11 @@ input:focus, select:focus { border-color: var(--primary); }
 .card { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
 .card-label { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
 .card-value { font-size: 24px; font-weight: 600; }
+/* Son snapshot'a gore yon gostergesi (canli deger yaninda) */
+.snap-ind { font-size: 0.6em; margin-left: 8px; vertical-align: middle; line-height: 1; }
+.snap-ind.up { color: var(--green, #3fb950); }
+.snap-ind.down { color: var(--red, #f85149); }
+.snap-ind.flat { color: #58a6ff; }
 .card.clickable { cursor: pointer; transition: border-color .15s, transform .15s, box-shadow .15s; }
 .card.clickable:hover { border-color: var(--accent, #2f81f7); transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
 .card.highlight { background: linear-gradient(135deg, rgba(47,129,247,0.18), rgba(47,129,247,0.04)); border-color: var(--accent, #2f81f7); }
