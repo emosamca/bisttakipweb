@@ -1345,10 +1345,14 @@
       <label>Telegram Chat ID
         <input type="text" id="tgChatId" autocomplete="off" placeholder="örn. 123456789" />
       </label>
+      <label>Haftalık Rapor Chat ID <span class="card-sub" style="font-weight:400">(opsiyonel)</span>
+        <input type="text" id="tgWeeklyChatId" autocomplete="off" placeholder="boş = günlük ile aynı" />
+      </label>
       <div class="info-box">
         Her gün <strong>21:00</strong>'de portföy özeti gönderilir. Chat ID'nizi öğrenmek için Telegram'da
         <strong>@userinfobot</strong>'a yazın; ayrıca botumuza (bir kez) mesaj atmanız gerekir.
         Boş bırakıp kaydederseniz bildirim kapanır.
+        <br><strong>Haftalık Rapor Chat ID</strong> girilirse haftalık özet oraya gönderilir; boş bırakılırsa günlük ile aynı yere gider.
         <span id="tgBotWarn" class="neg hidden"><br>⚠ Sunucuda bot tanımlı değil (BOT_TOKEN).</span>
       </div>
       <div class="modal-foot" style="flex-wrap:wrap; gap:8px">

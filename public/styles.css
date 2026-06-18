@@ -147,6 +147,8 @@ input:focus, select:focus { border-color: var(--primary); }
 .achv-prog-sub { font-size: 11px; color: var(--muted); }
 .card.highlight .card-value { color: var(--accent, #2f81f7); font-size: 28px; }
 .card-sub { font-size: 13px; margin-top: 4px; color: var(--muted); }
+#genTotalUsd { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+#genTotalUsd .ng-val { white-space: nowrap; }
 .pos { color: var(--green) !important; }
 .neg { color: var(--red) !important; }
 

@@ -267,9 +267,10 @@ CREATE TABLE IF NOT EXISTS binance_keys (
 
 -- Kullaniciya ozel Telegram bildirim ayari (chat_id yoksa mesaj gonderilmez)
 CREATE TABLE IF NOT EXISTS telegram_settings (
-  user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  chat_id     TEXT NOT NULL,
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  user_id        INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  chat_id        TEXT NOT NULL,
+  weekly_chat_id TEXT,
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Aylik enflasyon orani % (ORTAK; kullanici manuel girer). Fon-enflasyon kiyasi icin.
@@ -337,6 +338,9 @@ ALTER TABLE us_purchases ADD COLUMN IF NOT EXISTS commission NUMERIC(18,6) NOT N
 
 -- Snapshot tablosuna fon degeri (eski kayitlar 0 kabul edilir)
 ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS fund NUMERIC(20,4) NOT NULL DEFAULT 0;
+
+-- Haftalik raporlar icin ayri chat id (bos ise ana chat_id'ye gonderilir)
+ALTER TABLE telegram_settings ADD COLUMN IF NOT EXISTS weekly_chat_id TEXT;
 
 -- Gecmisi olmayan kullanicilar icin mevcut parolayi gecmise tohumla
 INSERT INTO password_history (user_id, password)

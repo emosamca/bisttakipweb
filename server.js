@@ -1716,8 +1716,12 @@ app.get('/api/achievements', requireAuth, async (req, res) => {
 
 app.get('/api/telegram', requireAuth, async (req, res) => {
   try {
-    const r = await db.query('SELECT chat_id FROM telegram_settings WHERE user_id=$1', [req.session.userId]);
-    res.json({ chatId: (r.rows[0] && r.rows[0].chat_id) || '', botConfigured: telegram.configured() });
+    const r = await db.query('SELECT chat_id, weekly_chat_id FROM telegram_settings WHERE user_id=$1', [req.session.userId]);
+    res.json({
+      chatId: (r.rows[0] && r.rows[0].chat_id) || '',
+      weeklyChatId: (r.rows[0] && r.rows[0].weekly_chat_id) || '',
+      botConfigured: telegram.configured(),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Alinamadi' });
@@ -1726,15 +1730,16 @@ app.get('/api/telegram', requireAuth, async (req, res) => {
 
 app.put('/api/telegram', requireAuth, async (req, res) => {
   const chatId = ((req.body && req.body.chatId) || '').trim();
+  const weeklyChatId = ((req.body && req.body.weeklyChatId) || '').trim();
   try {
     if (!chatId) {
       await db.query('DELETE FROM telegram_settings WHERE user_id=$1', [req.session.userId]);
       return res.json({ ok: true, removed: true });
     }
     await db.query(
-      `INSERT INTO telegram_settings (user_id, chat_id, updated_at) VALUES ($1,$2, now())
-       ON CONFLICT (user_id) DO UPDATE SET chat_id=EXCLUDED.chat_id, updated_at=now()`,
-      [req.session.userId, chatId]
+      `INSERT INTO telegram_settings (user_id, chat_id, weekly_chat_id, updated_at) VALUES ($1,$2,$3, now())
+       ON CONFLICT (user_id) DO UPDATE SET chat_id=EXCLUDED.chat_id, weekly_chat_id=EXCLUDED.weekly_chat_id, updated_at=now()`,
+      [req.session.userId, chatId, weeklyChatId || null]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -1778,8 +1783,8 @@ app.post('/api/telegram/send-weekly-now', requireAuth, async (req, res) => {
   if (!telegram.configured()) return res.status(400).json({ error: 'Sunucuda BOT_TOKEN tanımlı değil' });
   let chatId = ((req.body && req.body.chatId) || '').trim();
   if (!chatId) {
-    const row = (await db.query('SELECT chat_id FROM telegram_settings WHERE user_id=$1', [req.session.userId])).rows[0];
-    chatId = row && row.chat_id ? row.chat_id : '';
+    const row = (await db.query('SELECT chat_id, weekly_chat_id FROM telegram_settings WHERE user_id=$1', [req.session.userId])).rows[0];
+    chatId = row ? (row.weekly_chat_id || row.chat_id || '') : '';
   }
   if (!chatId) return res.status(400).json({ error: 'Önce chat_id girin' });
   try {
@@ -1822,15 +1827,17 @@ async function sendWeeklySummaries() {
   if (!telegram.configured()) return;
   let rows;
   try {
-    rows = (await db.query('SELECT user_id, chat_id FROM telegram_settings')).rows;
+    rows = (await db.query('SELECT user_id, chat_id, weekly_chat_id FROM telegram_settings')).rows;
   } catch (_) {
     return;
   }
   for (const row of rows) {
-    if (!row.chat_id) continue;
+    // Haftalik rapor: ayri chat id varsa oraya, yoksa ana chat_id'ye
+    const target = row.weekly_chat_id || row.chat_id;
+    if (!target) continue;
     try {
       const text = await buildWeeklySummaryText(row.user_id);
-      if (text) await telegram.send(row.chat_id, text);
+      if (text) await telegram.send(target, text);
     } catch (e) {
       console.error('Telegram haftalik ozet hatasi:', e.message);
     }

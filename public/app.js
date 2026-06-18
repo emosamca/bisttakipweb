@@ -4,6 +4,9 @@ const tl = (n) =>
   new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(Number(n) || 0);
 const num = (n) =>
   new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 4 }).format(Number(n) || 0);
+// Nakit Gucu icin sembolsuz, 2 ondalikli sade sayi (orn: 550.743,50)
+const ngfmt = (n) =>
+  new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
 const usd = (n) =>
   new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'USD' }).format(Number(n) || 0);
 // Kripto birim fiyatlari icin 8 ondalik basamak
@@ -1554,7 +1557,14 @@ async function genelLoadSummary() {
   // Toplam butce; dolar karsiligi alt satirda
   const usdRate = cash.usdRate || (cy.rate || null);
   $('genTotal').textContent = tl(total);
-  $('genTotalUsd').textContent = usdRate ? `≈ ${usd(total / usdRate)}` : '';
+  const usdStr = usdRate ? `≈ ${usd(total / usdRate)}` : '';
+  // Nakit Gucu (NG) = Toplam Butce - BIST Toplam Varlik (nakit+hisse); yalniz admin gorur
+  let ngStr = '';
+  if (currentRole === 'admin') {
+    const ng = total - (bistAssets || 0);
+    ngStr = `<span class="ng-val">NG: ₺${ngfmt(ng)}</span>`;
+  }
+  $('genTotalUsd').innerHTML = `<span>${usdStr}</span>${ngStr}`;
   pctSub('genTotalPct', aggCost > 0 ? aggProfit : null, aggCost);
 
   renderGenelPie(
@@ -2899,6 +2909,7 @@ async function openTelegram() {
   try {
     const t = await api('/api/telegram');
     $('tgChatId').value = t.chatId || '';
+    $('tgWeeklyChatId').value = t.weeklyChatId || '';
     $('tgBotWarn').classList.toggle('hidden', !!t.botConfigured);
   } catch (_) {}
   openModal('telegramModal');
@@ -2917,7 +2928,8 @@ $('telegramForm').addEventListener('submit', async (e) => {
   $('tgMsg').textContent = '';
   try {
     const chatId = $('tgChatId').value.trim();
-    await api('/api/telegram', { method: 'PUT', body: JSON.stringify({ chatId }) });
+    const weeklyChatId = $('tgWeeklyChatId').value.trim();
+    await api('/api/telegram', { method: 'PUT', body: JSON.stringify({ chatId, weeklyChatId }) });
     tgShow(chatId ? 'Kaydedildi. Her gün 21:00 özet gelecek.' : 'Bildirim kapatıldı.', true);
   } catch (e2) {
     $('tgError').textContent = e2.message;
@@ -2955,7 +2967,8 @@ $('tgSendWeekly').addEventListener('click', async () => {
   $('tgError').classList.add('hidden');
   tgShow('Haftalık özet gönderiliyor…', true);
   try {
-    await api('/api/telegram/send-weekly-now', { method: 'POST', body: JSON.stringify({ chatId: $('tgChatId').value.trim() }) });
+    const weeklyTarget = $('tgWeeklyChatId').value.trim() || $('tgChatId').value.trim();
+    await api('/api/telegram/send-weekly-now', { method: 'POST', body: JSON.stringify({ chatId: weeklyTarget }) });
     tgShow('Haftalık özet gönderildi ✅', true);
   } catch (e2) {
     $('tgError').textContent = e2.message;
