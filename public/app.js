@@ -623,6 +623,41 @@ async function genelLoadChart(liveTotals) {
   renderBudgetChart(series);
   renderCardSparks(series, liveTotals);
   renderSnapIndicators(series, liveTotals);
+  renderDailyPct(series);
+}
+
+// Kartlarin K/Z alt satirina gunluk degisimi parantez icinde ekler:
+// son kayitli snapshot ile bir onceki snapshot arasindaki yuzde degisim.
+// Yon oklu ve renkli, K/Z ile ayni fontta. Sadece secili 5 sinif icin.
+const DAILY_PCT_DEFS = [
+  { pctId: 'genBistPct', key: 'bist' },
+  { pctId: 'genUsPct', key: 'us' },
+  { pctId: 'genMetalPct', key: 'metal' },
+  { pctId: 'genCurrencyPct', key: 'currency' },
+  { pctId: 'genCryptoPct', key: 'crypto' },
+];
+
+function renderDailyPct(series) {
+  const s = series || [];
+  const last = s[s.length - 1];
+  const prev = s[s.length - 2];
+  DAILY_PCT_DEFS.forEach((d) => {
+    const el = $(d.pctId);
+    if (!el) return;
+    const old = el.querySelector('.daily-pct');
+    if (old) old.remove();
+    if (!last || !prev) return;
+    const p = Number(prev[d.key]);
+    const c = Number(last[d.key]);
+    if (!(p > 0) || !Number.isFinite(c)) return;
+    const pct = ((c - p) / p) * 100;
+    const up = c >= p;
+    const span = document.createElement('span');
+    span.className = 'daily-pct ' + (up ? 'pos' : 'neg');
+    span.textContent = ` (${up ? '▲' : '▼'} %${Math.abs(pct).toFixed(2)})`;
+    span.title = `Günlük: son snapshot ${tl(c)} vs önceki ${tl(p)}`;
+    el.appendChild(span);
+  });
 }
 
 // Kart degerinin yaninda son snapshot'a gore yon gostergesi:
@@ -640,8 +675,9 @@ function renderSnapIndicators(series, liveTotals) {
     const prev = Number(last[d.key]);
     if (!Number.isFinite(prev)) return;
     const diff = Number(cur) - prev;
-    // %0.01 (veya min 0.005 TL) altindaki farki "ayni" kabul et
-    const eps = Math.max(Math.abs(prev) * 0.0001, 0.005);
+    // Sabit 0.5 TL esik: kurus salinimlarini bastirir ama -100 gibi anlamli
+    // farklari gosterir (yuzdesel esik buyuk toplamlarda farki yutuyordu).
+    const eps = 0.5;
     let cls, sym;
     if (diff > eps) { cls = 'up'; sym = '▲'; }
     else if (diff < -eps) { cls = 'down'; sym = '▼'; }
