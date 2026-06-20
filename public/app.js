@@ -1724,15 +1724,19 @@ document.querySelectorAll('#genelDash .card[data-goto]').forEach((c) =>
 
 // Genel sekmesi: BIST toplam varligi + ABD guncel TL degeri + kiymetli maden TL degeri => toplam butce
 async function genelLoadSummary() {
+  // Her istek bagimsiz: biri (ozellikle yavas/flaky binance) hata verirse digerleri
+  // yine dolsun diye tek tek yakalayip {} dondur. Boylece "tum kartlar bos" olmaz;
+  // sadece basarisiz olan kart '—' gosterir, sonraki refresh'te kendiliginden duzelir.
+  const safe = (p) => p.catch(() => ({}));
   const [b, u, m, c, cy, fn, cash, bn] = await Promise.all([
-    api('/api/summary'),
-    api('/api/us/summary'),
-    api('/api/metal/summary'),
-    api('/api/currency/summary'),
-    api('/api/crypto/summary'),
-    api('/api/funds/summary'),
-    api('/api/cash-holdings/summary'),
-    api('/api/binance/total'),
+    safe(api('/api/summary')),
+    safe(api('/api/us/summary')),
+    safe(api('/api/metal/summary')),
+    safe(api('/api/currency/summary')),
+    safe(api('/api/crypto/summary')),
+    safe(api('/api/funds/summary')),
+    safe(api('/api/cash-holdings/summary')),
+    safe(api('/api/binance/total')),
   ]);
   const bistAssets = b.totalAssets != null ? b.totalAssets : null;
   const usValueTry = u.totalValueTRY != null ? u.totalValueTRY : null;
