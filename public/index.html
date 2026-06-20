@@ -32,6 +32,7 @@
       </div>
       <div id="bistMenu">
         <button class="btn primary block" id="openPurchase">+ Alım Ekle</button>
+        <button class="btn block" id="openBonus">🎁 Bedelsiz Ekle</button>
         <button class="btn block" id="openCash">+ Nakit / Temettü Ekle</button>
         <button class="btn block" id="openAdjust">⚖ Nakit Düzeltme</button>
         <button class="btn block" id="openPrice">+ Fiyat Ekle</button>
@@ -261,6 +262,7 @@
                 <option value="">Tüm Kaynaklar</option>
                 <option value="normal">Normal</option>
                 <option value="temettu">Temettü</option>
+                <option value="bedelsiz">Bedelsiz</option>
               </select>
             </div>
           </div>
@@ -818,6 +820,7 @@
           <select id="pSource">
             <option value="normal" selected>Normal</option>
             <option value="temettu">Temettü</option>
+            <option value="bedelsiz">Bedelsiz</option>
           </select>
         </label>
         <label>Dolar Kuru (₺/$)
@@ -845,6 +848,35 @@
         <button type="submit" class="btn primary">Kaydet</button>
       </div>
       <div class="error hidden" id="pError"></div>
+    </form>
+  </div>
+
+  <!-- BEDELSIZ MODAL -->
+  <div id="bonusModal" class="modal hidden">
+    <form class="modal-card" id="bonusForm">
+      <div class="modal-head">
+        <h3>🎁 Bedelsiz Pay Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="bDate" lang="tr" required />
+        </label>
+        <label>Hisse Adı
+          <input type="text" id="bSymbol" placeholder="örn. THYAO" required />
+        </label>
+        <label>Bedelsiz Oranı (%)
+          <input type="number" id="bRatio" step="any" min="0" placeholder="örn. 100" required />
+        </label>
+      </div>
+
+      <div class="info-box" id="bInfo">Hisse ve oran girin; eklenecek adet burada gösterilir.</div>
+
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="bError"></div>
     </form>
   </div>
 

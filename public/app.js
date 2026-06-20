@@ -384,6 +384,74 @@ $('purchaseForm').addEventListener('submit', async (e) => {
   }
 });
 
+// ---- Bedelsiz Pay Ekle ----
+function openBonusModal() {
+  $('bonusForm').reset();
+  $('bError').classList.add('hidden');
+  $('bDate').value = todayStr();
+  $('bSymbol').value = lastUsedSymbol();
+  updateBonusInfo();
+  openModal('bonusModal');
+  focusDate('bDate');
+}
+$('openBonus').addEventListener('click', openBonusModal);
+
+// Eklenecek bedelsiz adedini mevcut pozisyondan (purchaseCache) hesaplayip gosterir.
+// Backend ile ayni taban: o hisseye ait tum alimlarin adet toplami.
+function bonusBaseQty(sym) {
+  return purchaseCache
+    .filter((r) => r.symbol === sym)
+    .reduce((s, r) => s + Number(r.quantity), 0);
+}
+
+function updateBonusInfo() {
+  const box = $('bInfo');
+  const sym = $('bSymbol').value.trim().toUpperCase();
+  const ratio = Number($('bRatio').value);
+  if (!sym || !(ratio > 0)) {
+    box.classList.remove('has-data');
+    box.innerHTML = 'Hisse ve oran girin; eklenecek adet burada gösterilir.';
+    return;
+  }
+  const baseQty = bonusBaseQty(sym);
+  if (!(baseQty > 0)) {
+    box.classList.remove('has-data');
+    box.innerHTML = `<strong>${sym}</strong> — bu hisseden pozisyon yok; bedelsiz eklenemez.`;
+    return;
+  }
+  const newShares = Math.round(baseQty * (ratio / 100) * 10000) / 10000;
+  box.classList.add('has-data');
+  box.innerHTML =
+    `<strong>${sym}</strong> — mevcut <strong>${num(baseQty)}</strong> adet, ` +
+    `%${num(ratio)} bedelsiz → <strong>+${num(newShares)}</strong> adet ` +
+    `(yeni toplam <strong>${num(baseQty + newShares)}</strong>). ` +
+    `Ortalama maliyet adet oranında düşer; nakit ve toplam maliyet değişmez.`;
+}
+['bSymbol', 'bRatio'].forEach((id) => $(id).addEventListener('input', updateBonusInfo));
+
+$('bonusForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('bError');
+  err.classList.add('hidden');
+  try {
+    await api('/api/purchases/bonus', {
+      method: 'POST',
+      body: JSON.stringify({
+        trade_date: $('bDate').value,
+        symbol: $('bSymbol').value,
+        ratio: $('bRatio').value,
+      }),
+    });
+    const sym = $('bSymbol').value.trim().toUpperCase();
+    if (sym) localStorage.setItem('lastSymbol', sym);
+    closeModal('bonusModal');
+    refreshAll();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
 // ---- Nakit / Temettu Ekle / Duzenle ----
 function openCashModal(row) {
   $('cashForm').reset();
@@ -1105,7 +1173,7 @@ function renderPurchases() {
         <td class="num">${tl(r.price)}</td>
         <td class="num">${tl(r.total)}</td>
         <td class="num">${showFee(fee(r))}</td>
-        <td><span class="tag ${r.source}">${r.source === 'temettu' ? 'Temettü' : 'Normal'}</span></td>
+        <td><span class="tag ${r.source}">${r.source === 'temettu' ? 'Temettü' : r.source === 'bedelsiz' ? 'Bedelsiz' : 'Normal'}</span></td>
         <td class="num">${r.usd_rate ? num(r.usd_rate) : '—'}</td>
         <td><div class="row-actions">
           <button class="edit-btn" data-edit-p="${r.id}" title="Düzenle">✏️</button>

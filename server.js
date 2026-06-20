@@ -441,7 +441,7 @@ app.post('/api/purchases', requireAuth, async (req, res) => {
   if (!(qty > 0) || !(prc >= 0)) {
     return res.status(400).json({ error: 'Adet ve fiyat gecerli olmali' });
   }
-  const src = source === 'temettu' ? 'temettu' : 'normal';
+  const src = ['temettu', 'bedelsiz'].includes(source) ? source : 'normal';
   const usd = usd_rate ? Number(usd_rate) : null;
   const comm = commission_rate ? Number(commission_rate) : 0;
   const bsmv = bsmv_rate ? Number(bsmv_rate) : 0;
@@ -463,6 +463,44 @@ app.post('/api/purchases', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Alim kaydedilemedi' });
+  }
+});
+
+// ---- Bedelsiz pay (bonus issue) ----
+// Adet, mevcut pozisyonun 'ratio' yuzdesi kadar artar; fiyat=0/total=0 oldugu icin
+// toplam maliyet ve nakit DEGISMEZ -> ortalama maliyet adet oraninda duser.
+// source='bedelsiz' olarak isaretlenir. Mevcut tum hesaplar (currentPortfolio,
+// cashBalance, komisyon, snapshot) bu satiri dogal olarak dogru isler.
+app.post('/api/purchases/bonus', requireAuth, async (req, res) => {
+  const { trade_date, symbol, ratio } = req.body || {};
+  if (!trade_date || !symbol || ratio === undefined || ratio === null) {
+    return res.status(400).json({ error: 'Tarih, hisse ve oran gerekli' });
+  }
+  const rt = Number(ratio);
+  if (!(rt > 0)) return res.status(400).json({ error: 'Oran pozitif olmali' });
+  const sym = symbol.trim().toUpperCase();
+  try {
+    const cur = await db.query(
+      `SELECT COALESCE(SUM(quantity),0) AS qty FROM purchases WHERE user_id=$1 AND symbol=$2`,
+      [req.session.userId, sym]
+    );
+    const baseQty = Number(cur.rows[0].qty);
+    if (!(baseQty > 0)) {
+      return res.status(400).json({ error: 'Bu hisseden pozisyon yok; bedelsiz eklenemez' });
+    }
+    const newShares = Math.round(baseQty * (rt / 100) * 10000) / 10000;
+    if (!(newShares > 0)) {
+      return res.status(400).json({ error: 'Hesaplanan bedelsiz adedi 0 cikti' });
+    }
+    const r = await db.query(
+      `INSERT INTO purchases (user_id, trade_date, symbol, quantity, price, source, usd_rate, commission_rate, bsmv_rate, total)
+       VALUES ($1,$2,$3,$4,0,'bedelsiz',NULL,0,0,0) RETURNING *`,
+      [req.session.userId, trade_date, sym, newShares]
+    );
+    res.json({ ...r.rows[0], baseQty, newShares, ratio: rt });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Bedelsiz kaydedilemedi' });
   }
 });
 
@@ -582,7 +620,7 @@ app.put('/api/purchases/:id', requireAuth, async (req, res) => {
   if (!(qty > 0) || !(prc >= 0)) {
     return res.status(400).json({ error: 'Adet ve fiyat gecerli olmali' });
   }
-  const src = source === 'temettu' ? 'temettu' : 'normal';
+  const src = ['temettu', 'bedelsiz'].includes(source) ? source : 'normal';
   const usd = usd_rate ? Number(usd_rate) : null;
   const comm = commission_rate ? Number(commission_rate) : 0;
   const bsmv = bsmv_rate ? Number(bsmv_rate) : 0;
