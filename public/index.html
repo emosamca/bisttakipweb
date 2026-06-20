@@ -33,6 +33,7 @@
       <div id="bistMenu">
         <button class="btn primary block" id="openPurchase">+ Alım Ekle</button>
         <button class="btn block" id="openBonus">🎁 Bedelsiz Ekle</button>
+        <button class="btn block" id="openRights">💸 Bedelli Ekle</button>
         <button class="btn block" id="openCash">+ Nakit / Temettü Ekle</button>
         <button class="btn block" id="openAdjust">⚖ Nakit Düzeltme</button>
         <button class="btn block" id="openPrice">+ Fiyat Ekle</button>
@@ -263,6 +264,7 @@
                 <option value="normal">Normal</option>
                 <option value="temettu">Temettü</option>
                 <option value="bedelsiz">Bedelsiz</option>
+                <option value="bedelli">Bedelli</option>
               </select>
             </div>
           </div>
@@ -821,6 +823,7 @@
             <option value="normal" selected>Normal</option>
             <option value="temettu">Temettü</option>
             <option value="bedelsiz">Bedelsiz</option>
+            <option value="bedelli">Bedelli</option>
           </select>
         </label>
         <label>Dolar Kuru (₺/$)
@@ -877,6 +880,38 @@
         <button type="submit" class="btn primary">Kaydet</button>
       </div>
       <div class="error hidden" id="bError"></div>
+    </form>
+  </div>
+
+  <!-- BEDELLI MODAL -->
+  <div id="rightsModal" class="modal hidden">
+    <form class="modal-card" id="rightsForm">
+      <div class="modal-head">
+        <h3>💸 Bedelli Pay Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="rDate" lang="tr" required />
+        </label>
+        <label>Hisse Adı
+          <input type="text" id="rSymbol" placeholder="örn. THYAO" required />
+        </label>
+        <label>Bedelli Oranı (%)
+          <input type="number" id="rRatio" step="any" min="0" placeholder="örn. 50" required />
+        </label>
+        <label>Rüçhan Fiyatı (₺)
+          <input type="number" id="rPrice" step="any" min="0" placeholder="örn. 1" required />
+        </label>
+      </div>
+
+      <div class="info-box" id="rInfo">Hisse, oran ve fiyat girin; eklenecek adet ve maliyet burada gösterilir.</div>
+
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="rError"></div>
     </form>
   </div>
 
