@@ -308,6 +308,14 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
   PRIMARY KEY (user_id, snap_date)
 );
 
+-- Kalici anahtar/deger durum tablosu. Sunucu restart'larinda bellekte kaybolmamasi
+-- gereken kucuk bayraklar icin (orn. gunluk/haftalik ozetin en son gonderildigi gun).
+CREATE TABLE IF NOT EXISTS app_state (
+  key         TEXT PRIMARY KEY,
+  value       TEXT,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases(user_id);
 CREATE INDEX IF NOT EXISTS idx_purchases_symbol ON purchases(user_id, symbol);
 CREATE INDEX IF NOT EXISTS idx_cash_user ON cash_movements(user_id);

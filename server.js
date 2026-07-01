@@ -1958,16 +1958,42 @@ async function sendWeeklySummaries() {
   }
 }
 
-let lastDailySent = null;
+// Kalici durum okuma/yazma (app_state key/value tablosu). Restart sonrasi
+// "bugun zaten gonderildi" bilgisi bellekte degil DB'de tutulur.
+async function getAppState(key) {
+  try {
+    const r = await db.query('SELECT value FROM app_state WHERE key=$1', [key]);
+    return r.rows[0] ? r.rows[0].value : null;
+  } catch (_) {
+    return null;
+  }
+}
+async function setAppState(key, value) {
+  await db.query(
+    `INSERT INTO app_state (key, value, updated_at) VALUES ($1,$2, now())
+     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`,
+    [key, value]
+  );
+}
+
 async function dailyTick() {
   const now = new Date();
   if (now.getHours() !== SUMMARY_HOUR) return;
   const today = localDateStr(now);
-  if (lastDailySent === today) return; // gunde bir kez
-  lastDailySent = today;
-  await writeDailySnapshots(); // once tum kullanicilarin snapshot'i (gunluk birikim)
-  await sendDailySummaries(); // chat_id'si olanlara gunluk ozet
-  if (now.getDay() === WEEKLY_DAY) await sendWeeklySummaries(); // haftalik ozet gunu
+
+  // Gunluk ozet: DB'de tutulan son gonderim gunu bugun ise tekrar gonderme.
+  // Boylece saat 21:xx iken sunucu restart olsa bile ikinci kez gitmez.
+  if ((await getAppState('last_daily_sent')) !== today) {
+    await setAppState('last_daily_sent', today); // once isaretle (yeniden tetiklenmeyi engelle)
+    await writeDailySnapshots(); // once tum kullanicilarin snapshot'i (gunluk birikim)
+    await sendDailySummaries(); // chat_id'si olanlara gunluk ozet
+  }
+
+  // Haftalik ozet: ayri kalici bayrakla, bugun gonderildiyse tekrar etme.
+  if (now.getDay() === WEEKLY_DAY && (await getAppState('last_weekly_sent')) !== today) {
+    await setAppState('last_weekly_sent', today);
+    await sendWeeklySummaries(); // haftalik ozet gunu
+  }
 }
 
 // ===================== TEFAS FON ALIM route'lari =====================
