@@ -305,6 +305,151 @@ async function dca(symbol, start, daily, reinvest = false) {
   }
 }
 
+// Ortak: bir sembolun startDate'ten itibaren (gun, kapanis) serisi + donem temettuleri.
+// dca/simulate fonksiyonlari ayni veriyi kullanir.
+async function _priceAndDivs(sym, startDate) {
+  const r = await db.query(
+    `SELECT date, close FROM price_history
+      WHERE symbol = $1 AND date >= $2 AND close > 0
+      ORDER BY date`,
+    [sym, startDate]
+  );
+  const rows = r.rows;
+  if (!rows.length) return { rows: [], divs: [] };
+  const lastDate = rows[rows.length - 1].date;
+  const divRes = await db.query(
+    `SELECT pay_date, net FROM dividends
+      WHERE symbol = $1 AND pay_date >= $2 AND pay_date <= $3
+      ORDER BY pay_date`,
+    [sym, startDate, lastDate]
+  );
+  return { rows, divs: divRes.rows };
+}
+
+// Strateji 1: Maliyet dususunde alim.
+// Ilk gun 'qty' adet alinir. Sonraki her gun, kapanis ortalama maliyetin
+// 'dropPct' yuzde altina inerse yeniden alim yapilir:
+//   mode='qty'    -> yine 'qty' adet
+//   mode='amount' -> ilk alimin TL degeri kadar (qty * ilk kapanis)
+// reinvest=true ise gelen temettu o gunku fiyattan hisseye donusur (avg maliyeti dusurur).
+async function simulateDip(symbol, start, qty, dropPct, mode, reinvest = false) {
+  const sym = symbol.trim().toUpperCase();
+  const startDate = start < '2025-08-01' ? '2025-08-01' : start;
+  const m = mode === 'amount' ? 'amount' : 'qty';
+  const empty = {
+    symbol: sym, start: startDate, qty, dropPct, mode: m, reinvest,
+    days: 0, buys: 0, invested: 0, totalShares: 0, lastDate: null, lastClose: 0,
+    avgCost: 0, currentValue: 0, dividendCash: 0, dividendCount: 0, total: 0,
+    profit: 0, profitPct: 0,
+  };
+  try {
+    const { rows, divs } = await _priceAndDivs(sym, startDate);
+    if (!rows.length) return empty;
+    const lastDate = rows[rows.length - 1].date;
+    const firstClose = Number(rows[0].close);
+    const fixedAmount = qty * firstClose; // mode='amount' icin sabit TL
+    let shares = 0, costBasis = 0, invested = 0;
+    let dividendCash = 0, dividendCount = 0, buys = 0, lastClose = 0, di = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const close = Number(rows[i].close);
+      // once temettuleri isle (elde tutulan adet uzerinden)
+      while (di < divs.length && divs[di].pay_date <= rows[i].date) {
+        const cash = shares * Number(divs[di].net);
+        if (cash > 0) {
+          if (reinvest) { if (close > 0) shares += cash / close; }
+          else dividendCash += cash;
+          dividendCount++;
+        }
+        di++;
+      }
+      if (i === 0) {
+        shares += qty; costBasis += qty * close; invested += qty * close; buys++;
+      } else {
+        const avg = shares > 0 ? costBasis / shares : 0;
+        if (avg > 0 && close <= avg * (1 - dropPct / 100)) {
+          if (m === 'amount') { shares += fixedAmount / close; costBasis += fixedAmount; invested += fixedAmount; }
+          else { shares += qty; costBasis += qty * close; invested += qty * close; }
+          buys++;
+        }
+      }
+      lastClose = close;
+    }
+    const avgCost = shares > 0 ? costBasis / shares : 0;
+    const currentValue = shares * lastClose;
+    const total = currentValue + dividendCash;
+    return {
+      symbol: sym, start: startDate, qty, dropPct, mode: m, reinvest,
+      days: rows.length, buys, invested, totalShares: shares, lastDate, lastClose,
+      avgCost, currentValue, dividendCash, dividendCount, total,
+      profit: total - invested, profitPct: invested > 0 ? ((total - invested) / invested) * 100 : 0,
+    };
+  } catch (err) {
+    if (err.code === '42P01') return empty;
+    throw err;
+  }
+}
+
+// Strateji 2: Periyodik alim.
+// Ilk gun 'qty' adet alinir; sonra her 'period' (day|week) bir tekrar alim:
+//   mode='qty'    -> yine 'qty' adet
+//   mode='amount' -> ilk alimin TL degeri kadar
+// reinvest=true ise temettu o gunku fiyattan hisseye donusur.
+async function simulatePeriodic(symbol, start, qty, period, mode, reinvest = false) {
+  const sym = symbol.trim().toUpperCase();
+  const startDate = start < '2025-08-01' ? '2025-08-01' : start;
+  const m = mode === 'amount' ? 'amount' : 'qty';
+  const per = period === 'week' ? 'week' : 'day';
+  const empty = {
+    symbol: sym, start: startDate, qty, period: per, mode: m, reinvest,
+    days: 0, buys: 0, invested: 0, totalShares: 0, lastDate: null, lastClose: 0,
+    avgCost: 0, currentValue: 0, dividendCash: 0, dividendCount: 0, total: 0,
+    profit: 0, profitPct: 0,
+  };
+  try {
+    const { rows, divs } = await _priceAndDivs(sym, startDate);
+    if (!rows.length) return empty;
+    const lastDate = rows[rows.length - 1].date;
+    const firstClose = Number(rows[0].close);
+    const fixedAmount = qty * firstClose;
+    const WEEK = 7 * 86400000;
+    let shares = 0, costBasis = 0, invested = 0;
+    let dividendCash = 0, dividendCount = 0, buys = 0, lastClose = 0, di = 0, lastBuyTime = null;
+    for (let i = 0; i < rows.length; i++) {
+      const close = Number(rows[i].close);
+      while (di < divs.length && divs[di].pay_date <= rows[i].date) {
+        const cash = shares * Number(divs[di].net);
+        if (cash > 0) {
+          if (reinvest) { if (close > 0) shares += cash / close; }
+          else dividendCash += cash;
+          dividendCount++;
+        }
+        di++;
+      }
+      const t = new Date(rows[i].date).getTime();
+      let doBuy = i === 0;
+      if (i > 0) doBuy = per === 'week' ? t - lastBuyTime >= WEEK : true;
+      if (doBuy) {
+        if (m === 'amount') { shares += fixedAmount / close; costBasis += fixedAmount; invested += fixedAmount; }
+        else { shares += qty; costBasis += qty * close; invested += qty * close; }
+        buys++; lastBuyTime = t;
+      }
+      lastClose = close;
+    }
+    const avgCost = shares > 0 ? costBasis / shares : 0;
+    const currentValue = shares * lastClose;
+    const total = currentValue + dividendCash;
+    return {
+      symbol: sym, start: startDate, qty, period: per, mode: m, reinvest,
+      days: rows.length, buys, invested, totalShares: shares, lastDate, lastClose,
+      avgCost, currentValue, dividendCash, dividendCount, total,
+      profit: total - invested, profitPct: invested > 0 ? ((total - invested) / invested) * 100 : 0,
+    };
+  } catch (err) {
+    if (err.code === '42P01') return empty;
+    throw err;
+  }
+}
+
 // Belirli bir tarihteki kapanis fiyati (yoksa o tarihten onceki en yakin gun)
 async function priceOnDate(symbol, date) {
   const sym = symbol.trim().toUpperCase();
@@ -333,5 +478,7 @@ module.exports = {
   priceOnDate,
   historySymbols,
   dca,
+  simulateDip,
+  simulatePeriodic,
   listDividends,
 };

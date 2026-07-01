@@ -350,6 +350,42 @@ app.get('/api/dca', requireAuth, async (req, res) => {
   }
 });
 
+// Hesap makinesi · Strateji 1: maliyet dususunde alim
+app.get('/api/calc/dip', requireAuth, async (req, res) => {
+  const { symbol, start, qty, dropPct, mode, reinvest } = req.query;
+  if (!symbol || !start || qty === undefined || dropPct === undefined) {
+    return res.status(400).json({ error: 'symbol, start, qty ve dropPct gerekli' });
+  }
+  const q = Number(qty);
+  const dp = Number(dropPct);
+  if (!(q > 0)) return res.status(400).json({ error: 'Adet pozitif olmali' });
+  if (!(dp > 0)) return res.status(400).json({ error: 'Düşüş yüzdesi pozitif olmali' });
+  const reinv = reinvest === '1' || reinvest === 'true';
+  try {
+    res.json(await portfolio.simulateDip(symbol, start, q, dp, mode, reinv));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Hesaplanamadi' });
+  }
+});
+
+// Hesap makinesi · Strateji 2: periyodik alim (gun/hafta)
+app.get('/api/calc/periodic', requireAuth, async (req, res) => {
+  const { symbol, start, qty, period, mode, reinvest } = req.query;
+  if (!symbol || !start || qty === undefined) {
+    return res.status(400).json({ error: 'symbol, start ve qty gerekli' });
+  }
+  const q = Number(qty);
+  if (!(q > 0)) return res.status(400).json({ error: 'Adet pozitif olmali' });
+  const reinv = reinvest === '1' || reinvest === 'true';
+  try {
+    res.json(await portfolio.simulatePeriodic(symbol, start, q, period, mode, reinv));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Hesaplanamadi' });
+  }
+});
+
 // ---- Temettu takvimi (ORTAK referans veri) ----
 app.get('/api/dividends', requireAuth, async (req, res) => {
   try {

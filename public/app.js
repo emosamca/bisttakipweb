@@ -1510,12 +1510,34 @@ async function deleteUser(id, name) {
   }
 }
 
-// ---- Hesap makinesi (duzenli alim / DCA) ----
+// ---- Hesap makinesi (3 strateji: duzenli / dip / periyodik) ----
 let calcSymbolsLoaded = false;
+
+const CALC_INFO = {
+  daily: 'Başlangıç tarihinden itibaren <strong>her işlem günü</strong>, kapanış fiyatından girdiğiniz tutarda (₺) alım yapılsaydı bugün ne olurdu?',
+  dip: 'İlk gün belirtilen <strong>adet</strong> alınır. Sonra fiyat, o ana kadarki <strong>ortalama maliyetin</strong> belirttiğiniz yüzde altına her düştüğünde tekrar alım yapılır (aynı adet veya aynı ₺ değeri).',
+  periodic: 'İlk gün belirtilen <strong>adet</strong> alınır. Sonra seçtiğiniz periyotta (<strong>her gün / her hafta</strong>) tekrar alım yapılır (aynı adet veya aynı ₺ değeri).',
+};
+
+function setCalcStrategy(strat) {
+  $('calcInfo').innerHTML = CALC_INFO[strat] || '';
+  document
+    .querySelectorAll('#calcForm .calc-grp')
+    .forEach((el) => el.classList.toggle('hidden', el.dataset.grp !== strat));
+}
+$('calcStrategy').addEventListener('change', () => setCalcStrategy($('calcStrategy').value));
+
+function showCalcErr(msg) {
+  const err = $('calcError');
+  err.textContent = msg;
+  err.classList.remove('hidden');
+}
+
 $('openCalc').addEventListener('click', async () => {
   $('calcError').classList.add('hidden');
   $('calcResult').classList.add('hidden');
   openModal('calcModal');
+  setCalcStrategy($('calcStrategy').value);
   if (!calcSymbolsLoaded) {
     try {
       const syms = await api('/api/history-symbols');
@@ -1530,51 +1552,77 @@ $('openCalc').addEventListener('click', async () => {
   }
 });
 
+// Sonuc kutusunu stratejiye gore HTML olarak uretir (3 strateji ortak govde).
+function renderCalcResult(strategy, r) {
+  if (!r.days) return '<div class="cr-row"><span>Bu tarih aralığında fiyat verisi bulunamadı.</span></div>';
+  const plClass = r.profit >= 0 ? 'pos' : 'neg';
+  const modeLabel = r.mode === 'amount' ? 'aynı ₺ değeri' : 'aynı adet';
+  let html = `<div class="cr-row"><span>${r.symbol} · ${shortDate(r.start)} → ${shortDate(r.lastDate)}</span><strong>${r.days} işlem günü</strong></div>`;
+  if (strategy === 'daily') {
+    html += `<div class="cr-row"><span>Günlük alım</span><strong>${tl(r.daily)}</strong></div>`;
+  } else if (strategy === 'dip') {
+    html +=
+      `<div class="cr-row"><span>İlk alınan adet</span><strong>${num(r.qty)}</strong></div>` +
+      `<div class="cr-row"><span>Düşüş eşiği · tekrar</span><strong>%${num(r.dropPct)} · ${modeLabel}</strong></div>` +
+      `<div class="cr-row"><span>Toplam alım sayısı</span><strong>${r.buys} kez</strong></div>`;
+  } else {
+    const perLabel = r.period === 'week' ? 'her hafta' : 'her gün';
+    html +=
+      `<div class="cr-row"><span>İlk alınan adet</span><strong>${num(r.qty)}</strong></div>` +
+      `<div class="cr-row"><span>Periyot · tekrar</span><strong>${perLabel} · ${modeLabel}</strong></div>` +
+      `<div class="cr-row"><span>Toplam alım sayısı</span><strong>${r.buys} kez</strong></div>`;
+  }
+  html +=
+    `<div class="cr-row"><span>Toplam yatırılan</span><strong>${tl(r.invested)}</strong></div>` +
+    `<div class="cr-row"><span>Biriken hisse adedi</span><strong>${num(r.totalShares)}</strong></div>`;
+  if (strategy !== 'daily') {
+    html += `<div class="cr-row"><span>Ortalama maliyet</span><strong>${tl(r.avgCost)}</strong></div>`;
+  }
+  html += `<div class="cr-row"><span>Son kapanış (${shortDate(r.lastDate)})</span><strong>${tl(r.lastClose)}</strong></div>`;
+  if (r.dividendCount > 0) {
+    html += `<div class="cr-row"><span>Uygulanan temettü</span><strong>${r.dividendCount} kez${r.reinvest ? ' · hisseye dönüştürüldü' : ''}</strong></div>`;
+  }
+  html += `<div class="cr-row cr-big"><span>Bugünkü hisse değeri</span><strong>${tl(r.currentValue)}</strong></div>`;
+  if (!r.reinvest && r.dividendCash > 0) {
+    html +=
+      `<div class="cr-row"><span>Biriken temettü (nakit)</span><strong>${tl(r.dividendCash)}</strong></div>` +
+      `<div class="cr-row cr-big"><span>Toplam (hisse + nakit)</span><strong>${tl(r.total)}</strong></div>`;
+  }
+  html += `<div class="cr-row"><span>Kâr / Zarar</span><strong class="${plClass}">${tl(r.profit)} (%${r.profitPct.toFixed(1)})</strong></div>`;
+  return html;
+}
+
 $('calcForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const err = $('calcError');
-  err.classList.add('hidden');
+  $('calcError').classList.add('hidden');
+  const strategy = $('calcStrategy').value;
   const symbol = $('calcSymbol').value;
   const start = $('calcStart').value;
-  const daily = $('calcDaily').value;
-  if (!symbol) {
-    err.textContent = 'Hisse seçin';
-    err.classList.remove('hidden');
-    return;
-  }
+  if (!symbol) return showCalcErr('Hisse seçin');
   const reinvest = $('calcReinvest').checked ? '1' : '0';
+  const base = `symbol=${encodeURIComponent(symbol)}&start=${start}&reinvest=${reinvest}`;
+  let url;
+  if (strategy === 'daily') {
+    const daily = $('calcDaily').value;
+    if (!(Number(daily) > 0)) return showCalcErr('Günlük alım tutarı girin');
+    url = `/api/dca?${base}&daily=${encodeURIComponent(daily)}`;
+  } else if (strategy === 'dip') {
+    const qty = $('calcQtyDip').value, drop = $('calcDrop').value, mode = $('calcModeDip').value;
+    if (!(Number(qty) > 0)) return showCalcErr('İlk alınan adet girin');
+    if (!(Number(drop) > 0)) return showCalcErr('Düşüş yüzdesi girin');
+    url = `/api/calc/dip?${base}&qty=${encodeURIComponent(qty)}&dropPct=${encodeURIComponent(drop)}&mode=${mode}`;
+  } else {
+    const qty = $('calcQtyPer').value, period = $('calcPeriod').value, mode = $('calcModePer').value;
+    if (!(Number(qty) > 0)) return showCalcErr('İlk alınan adet girin');
+    url = `/api/calc/periodic?${base}&qty=${encodeURIComponent(qty)}&period=${period}&mode=${mode}`;
+  }
   try {
-    const r = await api(
-      `/api/dca?symbol=${encodeURIComponent(symbol)}&start=${start}&daily=${encodeURIComponent(daily)}&reinvest=${reinvest}`
-    );
+    const r = await api(url);
     const box = $('calcResult');
-    if (!r.days) {
-      box.innerHTML = '<div class="cr-row"><span>Bu tarih aralığında fiyat verisi bulunamadı.</span></div>';
-      box.classList.remove('hidden');
-      return;
-    }
-    const plClass = r.profit >= 0 ? 'pos' : 'neg';
-    let html =
-      `<div class="cr-row"><span>${r.symbol} · ${shortDate(r.start)} → ${shortDate(r.lastDate)}</span><strong>${r.days} işlem günü</strong></div>` +
-      `<div class="cr-row"><span>Günlük alım</span><strong>${tl(r.daily)}</strong></div>` +
-      `<div class="cr-row"><span>Toplam yatırılan</span><strong>${tl(r.invested)}</strong></div>` +
-      `<div class="cr-row"><span>Biriken hisse adedi</span><strong>${num(r.totalShares)}</strong></div>` +
-      `<div class="cr-row"><span>Son kapanış (${shortDate(r.lastDate)})</span><strong>${tl(r.lastClose)}</strong></div>`;
-    if (r.dividendCount > 0) {
-      html += `<div class="cr-row"><span>Uygulanan temettü</span><strong>${r.dividendCount} kez${r.reinvest ? ' · hisseye dönüştürüldü' : ''}</strong></div>`;
-    }
-    html += `<div class="cr-row cr-big"><span>Bugünkü hisse değeri</span><strong>${tl(r.currentValue)}</strong></div>`;
-    if (!r.reinvest && r.dividendCash > 0) {
-      html +=
-        `<div class="cr-row"><span>Biriken temettü (nakit)</span><strong>${tl(r.dividendCash)}</strong></div>` +
-        `<div class="cr-row cr-big"><span>Toplam (hisse + nakit)</span><strong>${tl(r.total)}</strong></div>`;
-    }
-    html += `<div class="cr-row"><span>Kâr / Zarar</span><strong class="${plClass}">${tl(r.profit)} (%${r.profitPct.toFixed(1)})</strong></div>`;
-    box.innerHTML = html;
+    box.innerHTML = renderCalcResult(strategy, r);
     box.classList.remove('hidden');
   } catch (e2) {
-    err.textContent = e2.message;
-    err.classList.remove('hidden');
+    showCalcErr(e2.message);
   }
 });
 

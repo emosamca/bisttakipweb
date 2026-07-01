@@ -1084,10 +1084,17 @@
   <div id="calcModal" class="modal hidden">
     <form class="modal-card" id="calcForm">
       <div class="modal-head">
-        <h3>Hesap Makinesi · Düzenli Alım</h3>
+        <h3>Hesap Makinesi</h3>
         <button type="button" class="x" data-close>×</button>
       </div>
-      <div class="info-box">Seçilen hisseden, başlangıç tarihinden itibaren <strong>her işlem günü</strong> kapanış fiyatından girdiğiniz tutarda alım yapılsaydı bugün ne olurdu?</div>
+      <label class="full">Strateji
+        <select id="calcStrategy">
+          <option value="daily">Düzenli Alım (her gün sabit ₺)</option>
+          <option value="dip">Maliyet düşüşünde alım</option>
+          <option value="periodic">Periyodik alım (gün / hafta)</option>
+        </select>
+      </label>
+      <div class="info-box" id="calcInfo"></div>
       <div class="grid2">
         <label>Hisse
           <select id="calcSymbol" required></select>
@@ -1095,12 +1102,46 @@
         <label>Başlangıç Tarihi
           <input type="date" id="calcStart" lang="tr" min="2025-08-01" value="2025-08-01" required />
         </label>
-        <label class="full">Günlük Alım Tutarı (₺)
-          <input type="number" id="calcDaily" step="any" min="0" placeholder="örn. 100" required />
+
+        <!-- Strateji: daily -->
+        <label class="full calc-grp" data-grp="daily">Günlük Alım Tutarı (₺)
+          <input type="number" id="calcDaily" step="any" min="0" placeholder="örn. 100" />
         </label>
+
+        <!-- Strateji: dip -->
+        <label class="calc-grp" data-grp="dip">İlk Alınan Adet
+          <input type="number" id="calcQtyDip" step="any" min="0" placeholder="örn. 100" />
+        </label>
+        <label class="calc-grp" data-grp="dip">Ort. Maliyetten Düşüş (%)
+          <input type="number" id="calcDrop" step="any" min="0" placeholder="örn. 10" />
+        </label>
+        <label class="full calc-grp" data-grp="dip">Tekrar Alım Şekli
+          <select id="calcModeDip">
+            <option value="qty">Aynı adet</option>
+            <option value="amount">Aynı TL değeri</option>
+          </select>
+        </label>
+
+        <!-- Strateji: periodic -->
+        <label class="calc-grp" data-grp="periodic">İlk Alınan Adet
+          <input type="number" id="calcQtyPer" step="any" min="0" placeholder="örn. 100" />
+        </label>
+        <label class="calc-grp" data-grp="periodic">Periyot
+          <select id="calcPeriod">
+            <option value="day">Her gün</option>
+            <option value="week">Her hafta</option>
+          </select>
+        </label>
+        <label class="full calc-grp" data-grp="periodic">Tekrar Alım Şekli
+          <select id="calcModePer">
+            <option value="qty">Aynı adet</option>
+            <option value="amount">Aynı TL değeri</option>
+          </select>
+        </label>
+
         <label class="full checkbox-row">
           <input type="checkbox" id="calcReinvest" />
-          <span>Gelen temettü ile hisse alınsın (yoksa nakit olarak gösterilir)</span>
+          <span>Gelen temettü ile hisse alınsın (geri yatırım; yoksa nakit gösterilir)</span>
         </label>
       </div>
       <div class="modal-foot">
