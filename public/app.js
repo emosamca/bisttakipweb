@@ -752,6 +752,7 @@ async function genelLoadChart(liveTotals) {
     series = await api('/api/snapshots');
   } catch (_) {}
   renderBudgetChart(series);
+  renderPortfolioChart(series);
   renderCardSparks(series, liveTotals);
   renderSnapIndicators(series, liveTotals);
   renderDailyPct(series);
@@ -877,19 +878,36 @@ function renderSpark(boxId, series, key, color, liveVal) {
 }
 
 function renderBudgetChart(series) {
-  const box = $('genBudgetChart');
+  renderTimeChart('genBudgetChart', series, (s) => Number(s.total), '#2f81f7', 'rgba(47,129,247,0.12)');
+}
+
+// Nakit haric portfoy: toplam butce - nakit. Nakit gunluk cok oynadigindan
+// asil portfoy gidisatini ayri bir grafikte gosterir.
+function renderPortfolioChart(series) {
+  renderTimeChart(
+    'genPortfolioChart',
+    series,
+    (s) => Number(s.total) - (Number(s.cash) || 0),
+    '#3fb950',
+    'rgba(63,185,80,0.12)'
+  );
+}
+
+function renderTimeChart(boxId, series, valueFn, stroke, fill) {
+  const box = $(boxId);
+  if (!box) return;
   if (!series || series.length < 2) {
     box.innerHTML = '<div class="chart-empty">Yeterli veri yok — her gün otomatik birikir (en az 2 gün gerekir).</div>';
     return;
   }
   const W = 900, H = 260, pad = { l: 72, r: 16, t: 16, b: 28 };
   const innerW = W - pad.l - pad.r, innerH = H - pad.t - pad.b;
-  const vals = series.map((s) => Number(s.total));
+  const vals = series.map((s) => valueFn(s));
   let min = Math.min(...vals), max = Math.max(...vals);
   if (min === max) { min = min * 0.99; max = max * 1.01 || 1; }
   const X = (i) => pad.l + (i / (series.length - 1)) * innerW;
   const Y = (v) => pad.t + innerH - ((v - min) / (max - min)) * innerH;
-  const dline = series.map((s, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(Number(s.total)).toFixed(1)}`).join(' ');
+  const dline = vals.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
   const area = `${dline} L${X(series.length - 1).toFixed(1)},${(pad.t + innerH).toFixed(1)} L${X(0).toFixed(1)},${(pad.t + innerH).toFixed(1)} Z`;
   let grid = '';
   for (let k = 0; k <= 4; k++) {
@@ -900,8 +918,8 @@ function renderBudgetChart(series) {
   }
   box.innerHTML = `<svg viewBox="0 0 ${W} ${H}">
     ${grid}
-    <path d="${area}" fill="rgba(47,129,247,0.12)"/>
-    <path d="${dline}" fill="none" stroke="#2f81f7" stroke-width="2"/>
+    <path d="${area}" fill="${fill}"/>
+    <path d="${dline}" fill="none" stroke="${stroke}" stroke-width="2"/>
     <text class="xtick" x="${pad.l}" y="${H - 8}" style="text-anchor:start">${shortDate(series[0].date)}</text>
     <text class="xtick" x="${W - pad.r}" y="${H - 8}" style="text-anchor:end">${shortDate(series[series.length - 1].date)}</text>
   </svg>`;
