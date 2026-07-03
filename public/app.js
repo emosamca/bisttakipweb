@@ -3402,6 +3402,16 @@ function renderFund(d) {
     $('fCardReal').className = 'card-value';
     $('fCardRealSub').textContent = d.hasTufe ? '' : 'TÜFE girilmemiş';
   }
+  if (d.vsUsdPct != null) {
+    const upos = d.vsUsdPct >= 0;
+    $('fCardUsd').textContent = `${upos ? '▲' : '▼'} %${Math.abs(d.vsUsdPct).toFixed(2)}`;
+    $('fCardUsd').className = 'card-value ' + (upos ? 'pos' : 'neg');
+    $('fCardUsdSub').textContent = `USD çarpanı: ${fund4(d.usdFactor)}×`;
+  } else {
+    $('fCardUsd').textContent = '—';
+    $('fCardUsd').className = 'card-value';
+    $('fCardUsdSub').textContent = d.hasUsd ? '' : 'Kur geçmişi yok';
+  }
   renderFundChart(d.series);
   renderFundMonthly(d.series);
 }
@@ -3417,8 +3427,13 @@ function renderFundChart(series) {
   const W = 900, H = 300, pad = { l: 64, r: 16, t: 12, b: 28 };
   const innerW = W - pad.l - pad.r, innerH = H - pad.t - pad.b;
   const hasInfl = series.some((s) => s.inflation != null);
+  const hasUsd = series.some((s) => s.usd != null);
   const all = [];
-  series.forEach((s) => { all.push(s.price, s.avgCost); if (s.inflation != null) all.push(s.inflation); });
+  series.forEach((s) => {
+    all.push(s.price, s.avgCost);
+    if (s.inflation != null) all.push(s.inflation);
+    if (s.usd != null) all.push(s.usd);
+  });
   let min = Math.min(...all), max = Math.max(...all);
   if (min === max) { min *= 0.99; max = max * 1.01 || 1; }
   const pd = (max - min) * 0.05; min -= pd; max += pd;
@@ -3442,6 +3457,7 @@ function renderFundChart(series) {
   let paths = `<path d="${linePath('price')}" fill="none" stroke="#2f81f7" stroke-width="2"/>`;
   paths += `<path d="${linePath('avgCost')}" fill="none" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="5 4"/>`;
   if (hasInfl) paths += `<path d="${linePath('inflation')}" fill="none" stroke="#d29922" stroke-width="1.5"/>`;
+  if (hasUsd) paths += `<path d="${linePath('usd')}" fill="none" stroke="#3fb950" stroke-width="1.5"/>`;
   box.innerHTML = `<svg viewBox="0 0 ${W} ${H}">
     ${grid}
     ${paths}
@@ -3451,7 +3467,8 @@ function renderFundChart(series) {
   leg.innerHTML =
     '<span class="cl-item"><span class="cl-line" style="background:#2f81f7"></span>Birim Fiyat</span>' +
     '<span class="cl-item"><span class="cl-line" style="background:#8b949e"></span>Maliyet</span>' +
-    (hasInfl ? '<span class="cl-item"><span class="cl-line" style="background:#d29922"></span>Enflasyon</span>' : '');
+    (hasInfl ? '<span class="cl-item"><span class="cl-line" style="background:#d29922"></span>Enflasyon</span>' : '') +
+    (hasUsd ? '<span class="cl-item"><span class="cl-line" style="background:#3fb950"></span>USD</span>' : '');
 }
 
 function renderFundMonthly(series) {

@@ -105,6 +105,26 @@ async function computeFund(userId) {
   const tufeAt = (date) => (tufeRows.length ? cumAt(date.slice(0, 7)) / startCum : null);
   const tufeStart = tufeRows.length ? 1 : null;
 
+  // ---- USD/TRY gecmisi -> dolar benchmark carpani (TUFE ile ayni mantik) ----
+  // Baz = baslangic tarihindeki (veya oncesindeki en yakin) kur; carpan 1'den baslar.
+  let fxRows = [];
+  try {
+    fxRows = (await db.query('SELECT date, rate FROM fx_rates_history ORDER BY date')).rows
+      .map((r) => ({ date: r.date, rate: Number(r.rate) }));
+  } catch (e) {
+    if (e.code !== '42P01') throw e;
+  }
+  const usdOnOrBefore = (date) => {
+    let v = null;
+    for (const r of fxRows) { if (r.date <= date) v = r.rate; else break; }
+    return v !== null ? v : fxRows.length ? fxRows[0].rate : null; // erken donem: ilk kuru ileri tasi
+  };
+  const usdBase = usdOnOrBefore(startDate);
+  const usdAt = (date) => {
+    const v = usdOnOrBefore(date);
+    return usdBase && v ? v / usdBase : null;
+  };
+
   // ---- Gunluk seri ----
   const unitsAt = (date) => {
     let u = 0;
@@ -144,6 +164,7 @@ async function computeFund(userId) {
       units: u,
       contributed: contrib,
       inflation: tufeStart && ts ? ts / tufeStart : null,
+      usd: usdAt(date),
     });
   }
 
@@ -154,15 +175,29 @@ async function computeFund(userId) {
   const avgCost = units > 0 ? contributions / units : 1;
   const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const inflNow = tufeStart && tufeAt(today) ? tufeAt(today) / tufeStart : series.length ? series[series.length - 1].inflation : null;
+  // Guncel kur: fx_rates'teki en son kayit; yoksa gecmisteki son deger
+  let usdNow = null;
+  if (usdBase) {
+    try {
+      const r = await db.query('SELECT rate FROM fx_rates ORDER BY date DESC LIMIT 1');
+      if (r.rows.length && Number(r.rows[0].rate) > 0) usdNow = Number(r.rows[0].rate) / usdBase;
+    } catch (e) {
+      if (e.code !== '42P01') throw e;
+    }
+    if (usdNow === null) usdNow = usdAt(today);
+  }
   if (series.length && series[series.length - 1].date === today) {
     const last = series[series.length - 1];
     last.price = currentPrice; last.value = liveValue; last.avgCost = avgCost;
+    if (usdNow != null) last.usd = usdNow;
   } else {
-    series.push({ date: today, price: currentPrice, avgCost, value: liveValue, units, contributed: contributions, inflation: inflNow });
+    series.push({ date: today, price: currentPrice, avgCost, value: liveValue, units, contributed: contributions, inflation: inflNow, usd: usdNow });
   }
 
   const gainPct = avgCost > 0 ? (currentPrice / avgCost - 1) * 100 : 0;
   const realReturnPct = inflNow && currentPrice ? (currentPrice / inflNow - 1) * 100 : null;
+  // Dolara karsi getiri: birim fiyat USD carpaninin ne kadar ustunde/altinda
+  const vsUsdPct = usdNow && currentPrice ? (currentPrice / usdNow - 1) * 100 : null;
 
   return {
     hasData: true,
@@ -178,6 +213,9 @@ async function computeFund(userId) {
     inflationValue: inflNow != null ? contributions * inflNow : null, // kaba: katki * carpan
     realReturnPct,
     hasTufe: tufeRows.length > 0,
+    usdFactor: usdNow,                                          // baslangictan bugune USD carpani (1->X)
+    vsUsdPct,
+    hasUsd: usdBase != null,
     series,
   };
 }
