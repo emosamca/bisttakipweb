@@ -1787,8 +1787,7 @@ app.get('/api/snapshots', requireAuth, async (req, res) => {
 });
 
 // ===================== CSV DISA AKTARMA =====================
-// UTF-8 BOM + ';' ayirici + ondalik NOKTA + GG.AA.YYYY tarih.
-// (Kullanicinin Excel'i: ondalik nokta, kolon ayirici ';'.)
+// Turkce Excel uyumu: UTF-8 BOM + ';' ayirici + ondalik VIRGUL + GG.AA.YYYY tarih.
 function csvDate(d) {
   // DATE kolonlari type parser sayesinde 'YYYY-MM-DD' string gelir
   const s = String(d).slice(0, 10);
@@ -1797,17 +1796,17 @@ function csvDate(d) {
 }
 function csvNum(v) {
   if (v === null || v === undefined || v === '') return '';
-  return String(Number(v));
+  return String(Number(v)).replace('.', ',');
 }
 function csvSend(res, filename, header, rows) {
   const esc = (x) => {
     const s = x === null || x === undefined ? '' : String(x);
-    return /[,;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
   const lines = [header.join(';')].concat(rows.map((r) => r.map(esc).join(';')));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-  res.send('\uFEFF' + lines.join('\r\n')); // BOM: Excel'in UTF-8'i tanimasi icin
+  res.send('﻿' + lines.join('\r\n')); // BOM: Excel'in UTF-8'i tanimasi icin
 }
 
 const METAL_TR = { gold: 'Altın', silver: 'Gümüş' };

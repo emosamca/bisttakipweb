@@ -44,6 +44,7 @@ body {
 .btn.ghost { background: transparent; }
 .btn.block { width: 100%; margin-bottom: 10px; text-align: left; }
 .btn.small { padding: 6px 10px; font-size: 12px; }
+a.btn { text-decoration: none; display: inline-block; }
 
 /* ---- Login ---- */
 .login-wrap {

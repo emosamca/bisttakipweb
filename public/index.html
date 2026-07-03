@@ -155,12 +155,15 @@
       <section class="panel">
         <div class="panel-head">
           <h3>Toplam Bütçe (Zaman)</h3>
+          <div style="display:flex; align-items:center; gap:10px">
+          <a class="btn ghost small" href="/api/export/snapshots.csv" download title="Snapshot serisini Excel/CSV olarak indir">⬇ CSV</a>
           <div class="range-btns" id="genBudgetRange">
             <button type="button" data-r="1m">1A</button>
             <button type="button" data-r="3m">3A</button>
             <button type="button" data-r="6m">6A</button>
             <button type="button" data-r="1y">1Y</button>
             <button type="button" class="active" data-r="all">Tümü</button>
+          </div>
           </div>
         </div>
         <div id="genBudgetChart" class="value-chart"><div class="chart-empty">Yükleniyor…</div></div>
@@ -289,6 +292,7 @@
                 <option value="bedelsiz">Bedelsiz</option>
                 <option value="bedelli">Bedelli</option>
               </select>
+              <a class="btn ghost small" href="/api/export/bist.csv" download title="Excel/CSV olarak indir">⬇ CSV</a>
             </div>
           </div>
           <div class="table-wrap">
@@ -478,7 +482,10 @@
         </div>
 
         <section class="panel">
-          <h3>ABD Alım Geçmişi</h3>
+          <div class="panel-head">
+            <h3>ABD Alım Geçmişi</h3>
+            <a class="btn ghost small" href="/api/export/us.csv" download title="Excel/CSV olarak indir">⬇ CSV</a>
+          </div>
           <div class="table-wrap">
             <table id="usPurchasesTable">
               <thead>
@@ -543,7 +550,10 @@
         </div>
 
         <section class="panel">
-          <h3>Kıymetli Maden Alım Geçmişi</h3>
+          <div class="panel-head">
+            <h3>Kıymetli Maden Alım Geçmişi</h3>
+            <a class="btn ghost small" href="/api/export/metal.csv" download title="Excel/CSV olarak indir">⬇ CSV</a>
+          </div>
           <div class="table-wrap">
             <table id="metalPurchasesTable">
               <thead>
@@ -606,7 +616,10 @@
         </div>
 
         <section class="panel">
-          <h3>Döviz Alım Geçmişi</h3>
+          <div class="panel-head">
+            <h3>Döviz Alım Geçmişi</h3>
+            <a class="btn ghost small" href="/api/export/currency.csv" download title="Excel/CSV olarak indir">⬇ CSV</a>
+          </div>
           <div class="table-wrap">
             <table id="currencyPurchasesTable">
               <thead>
@@ -687,7 +700,10 @@
         </div>
 
         <section class="panel">
-          <h3>Kripto Alım Geçmişi</h3>
+          <div class="panel-head">
+            <h3>Kripto Alım Geçmişi</h3>
+            <a class="btn ghost small" href="/api/export/crypto.csv" download title="Excel/CSV olarak indir">⬇ CSV</a>
+          </div>
           <div class="table-wrap">
             <table id="cryptoPurchasesTable">
               <thead>
@@ -754,7 +770,10 @@
         </div>
 
         <section class="panel">
-          <h3>Fon Alım Geçmişi</h3>
+          <div class="panel-head">
+            <h3>Fon Alım Geçmişi</h3>
+            <a class="btn ghost small" href="/api/export/funds.csv" download title="Excel/CSV olarak indir">⬇ CSV</a>
+          </div>
           <div class="table-wrap">
             <table id="fundsPurchasesTable">
               <thead>
