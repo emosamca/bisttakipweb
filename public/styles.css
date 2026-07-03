@@ -163,6 +163,12 @@ input:focus, select:focus { border-color: var(--primary); }
 .panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .panel-head h3 { margin: 0; }
 
+/* Grafik donem secici (1A/3A/6A/1Y/Tumu) */
+.range-btns { display: flex; gap: 4px; }
+.range-btns button { background: var(--bg-elev); border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.range-btns button:hover { color: var(--text); background: #232a3a; }
+.range-btns button.active { color: var(--text); background: var(--primary); border-color: var(--primary); font-weight: 600; }
+
 /* ---- Pie chart ---- */
 .chart-wrap { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
 .pie { width: 200px; height: 200px; flex-shrink: 0; }

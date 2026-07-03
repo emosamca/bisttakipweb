@@ -746,17 +746,47 @@ function renderGenelPie(items, total) {
 }
 
 // ---- Genel: Toplam Butce zaman grafigi (gunluk snapshot'lardan) ----
+let genSnapSeries = []; // donem secici yeniden cizimlerinde kullanilan onbellek
+
 async function genelLoadChart(liveTotals) {
   let series = [];
   try {
     series = await api('/api/snapshots');
   } catch (_) {}
+  genSnapSeries = series;
   renderBudgetChart(series);
   renderPortfolioChart(series);
   renderCardSparks(series, liveTotals);
   renderSnapIndicators(series, liveTotals);
   renderDailyPct(series);
 }
+
+// ---- Donem secici (1A/3A/6A/1Y/Tumu) ----
+const genRangeState = { genBudgetRange: 'all', genPortfolioRange: 'all' };
+
+// Serinin SON tarihinden geriye N ay: 'all' ise tum seri.
+function filterByRange(series, range) {
+  if (!series || !series.length || range === 'all') return series || [];
+  const months = { '1m': 1, '3m': 3, '6m': 6, '1y': 12 }[range];
+  if (!months) return series;
+  const d = new Date(series[series.length - 1].date);
+  d.setMonth(d.getMonth() - months);
+  const cutoff = d.toISOString().slice(0, 10);
+  return series.filter((s) => s.date >= cutoff);
+}
+
+['genBudgetRange', 'genPortfolioRange'].forEach((id) => {
+  const box = $(id);
+  if (!box) return;
+  box.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-r]');
+    if (!btn) return;
+    genRangeState[id] = btn.dataset.r;
+    box.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
+    if (id === 'genBudgetRange') renderBudgetChart(genSnapSeries);
+    else renderPortfolioChart(genSnapSeries);
+  });
+});
 
 // Kartlarin K/Z alt satirina gunluk degisimi parantez icinde ekler:
 // son kayitli snapshot ile bir onceki snapshot arasindaki yuzde degisim.
@@ -878,7 +908,13 @@ function renderSpark(boxId, series, key, color, liveVal) {
 }
 
 function renderBudgetChart(series) {
-  renderTimeChart('genBudgetChart', series, (s) => Number(s.total), '#2f81f7', 'rgba(47,129,247,0.12)');
+  renderTimeChart(
+    'genBudgetChart',
+    filterByRange(series, genRangeState.genBudgetRange),
+    (s) => Number(s.total),
+    '#2f81f7',
+    'rgba(47,129,247,0.12)'
+  );
 }
 
 // Nakit haric portfoy: toplam butce - nakit. Nakit gunluk cok oynadigindan
@@ -886,7 +922,7 @@ function renderBudgetChart(series) {
 function renderPortfolioChart(series) {
   renderTimeChart(
     'genPortfolioChart',
-    series,
+    filterByRange(series, genRangeState.genPortfolioRange),
     (s) => Number(s.total) - (Number(s.cash) || 0),
     '#3fb950',
     'rgba(63,185,80,0.12)'

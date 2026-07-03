@@ -153,12 +153,30 @@
       </section>
 
       <section class="panel">
-        <h3>Toplam Bütçe (Zaman)</h3>
+        <div class="panel-head">
+          <h3>Toplam Bütçe (Zaman)</h3>
+          <div class="range-btns" id="genBudgetRange">
+            <button type="button" data-r="1m">1A</button>
+            <button type="button" data-r="3m">3A</button>
+            <button type="button" data-r="6m">6A</button>
+            <button type="button" data-r="1y">1Y</button>
+            <button type="button" class="active" data-r="all">Tümü</button>
+          </div>
+        </div>
         <div id="genBudgetChart" class="value-chart"><div class="chart-empty">Yükleniyor…</div></div>
       </section>
 
       <section class="panel">
-        <h3>Portföy (Nakit Hariç)</h3>
+        <div class="panel-head">
+          <h3>Portföy (Nakit Hariç)</h3>
+          <div class="range-btns" id="genPortfolioRange">
+            <button type="button" data-r="1m">1A</button>
+            <button type="button" data-r="3m">3A</button>
+            <button type="button" data-r="6m">6A</button>
+            <button type="button" data-r="1y">1Y</button>
+            <button type="button" class="active" data-r="all">Tümü</button>
+          </div>
+        </div>
         <div id="genPortfolioChart" class="value-chart"><div class="chart-empty">Yükleniyor…</div></div>
       </section>
       </div><!-- /genelDash -->
