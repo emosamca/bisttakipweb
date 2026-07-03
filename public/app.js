@@ -1941,6 +1941,10 @@ async function usRefreshAll() {
 async function usLoadSummary() {
   const s = await api('/api/us/summary');
   $('usCardRate').textContent = s.rate != null ? tl(s.rate) : '—';
+  $('usCardCash').textContent = usd(s.cashUSD || 0);
+  $('usCardCashTry').textContent = s.cashTRY != null ? tl(s.cashTRY) : '';
+  const cashCls = (s.cashUSD || 0) < 0 ? 'neg' : '';
+  $('usCardCash').className = 'card-value ' + cashCls;
   $('usCardCostUsd').textContent = usd(s.totalCostUSD);
   $('usCardCostTry').textContent = tl(s.totalCostTRY);
   $('usCardValueUsd').textContent = s.totalValueUSD != null ? usd(s.totalValueUSD) : '—';

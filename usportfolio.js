@@ -119,10 +119,25 @@ async function holdings(userId) {
     .filter((h) => h.quantity > 0 || h.costBasisUSD !== 0);
 }
 
+// ABD nakit bakiyesi (USD) = tum nakit/temettu girisleri - tum alim toplamlari.
+// us_cash_movements.amount ve us_purchases.total zaten USD cinsinden.
+async function cashBalance(userId) {
+  const inRes = await db.query(
+    `SELECT COALESCE(SUM(amount),0) v FROM us_cash_movements WHERE user_id=$1`,
+    [userId]
+  );
+  const outRes = await db.query(
+    `SELECT COALESCE(SUM(total),0) v FROM us_purchases WHERE user_id=$1`,
+    [userId]
+  );
+  return Number(inRes.rows[0].v) - Number(outRes.rows[0].v);
+}
+
 async function summary(userId) {
   const list = await holdings(userId);
   const prices = await priceMap();
   const rate = await currentRate();
+  const cashUSD = await cashBalance(userId);
 
   list.forEach((h) => {
     const p = prices[h.symbol];
@@ -152,6 +167,8 @@ async function summary(userId) {
   return {
     rate,
     holdings: list,
+    cashUSD,
+    cashTRY: rate !== null ? cashUSD * rate : null,
     totalCostUSD,
     totalCostTRY,
     totalValueUSD: hasPrice ? totalValueUSD : null,
@@ -170,5 +187,6 @@ module.exports = {
   priceMap,
   holdingsBeforeDate,
   holdings,
+  cashBalance,
   summary,
 };
