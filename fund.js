@@ -9,6 +9,27 @@ const portfolio = require('./portfolio');
 // Ayni gun icinde olay onceligi: temettu/duzeltme -> katki -> alim
 const TP = { dividend: 0, adjust: 1, deposit: 2, buy: 3 };
 
+// Para-agirlikli yillik getiri (XIRR). flows: [{date:'YYYY-MM-DD', amount}]
+// Yatirimci bakisi: katkilar negatif (cepten cikar), guncel deger pozitif.
+// NPV(r) = SUM(amount / (1+r)^yil) = 0 denklemini bisection ile cozer.
+function xirr(flows) {
+  if (!flows || flows.length < 2) return null;
+  const t0 = new Date(flows[0].date).getTime();
+  const yrs = flows.map((f) => (new Date(f.date).getTime() - t0) / (365.25 * 86400000));
+  const npv = (r) => flows.reduce((s, f, i) => s + f.amount / Math.pow(1 + r, yrs[i]), 0);
+  let lo = -0.9999, hi = 10; // %-99,99 ile %1000 arasi
+  let flo = npv(lo), fhi = npv(hi);
+  if (!Number.isFinite(flo) || !Number.isFinite(fhi) || flo * fhi > 0) return null; // kok yok
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    const fm = npv(mid);
+    if (!Number.isFinite(fm)) return null;
+    if (Math.abs(fm) < 1e-7) return mid;
+    if (flo * fm < 0) { hi = mid; fhi = fm; } else { lo = mid; flo = fm; }
+  }
+  return (lo + hi) / 2;
+}
+
 async function computeFund(userId) {
   const purchases = (
     await db.query('SELECT trade_date, symbol, quantity, total FROM purchases WHERE user_id=$1 ORDER BY trade_date, id', [userId])
@@ -199,6 +220,18 @@ async function computeFund(userId) {
   // Dolara karsi getiri: birim fiyat USD carpaninin ne kadar ustunde/altinda
   const vsUsdPct = usdNow && currentPrice ? (currentPrice / usdNow - 1) * 100 : null;
 
+  // ---- Getiri metrikleri ----
+  // TWR: birim fiyat 1'den basladigi icin kumulatif zaman-agirlikli getiri = fiyat-1.
+  // Yillik TWR = fiyat^(365/gun) - 1 (donem 1 yildan kisaysa yillige cevrilmis tahmindir).
+  const daysHeld = Math.max(1, Math.round((new Date(today) - new Date(startDate)) / 86400000));
+  const twrCumPct = (currentPrice - 1) * 100;
+  const twrAnnualPct = currentPrice > 0 ? (Math.pow(currentPrice, 365 / daysHeld) - 1) * 100 : null;
+  // XIRR: her katki cepten cikis (negatif), bugunku toplam deger giris (pozitif)
+  const flows = deposits.map((d) => ({ date: d.date, amount: -d.amount }));
+  flows.push({ date: today, amount: liveValue });
+  const xr = liveValue > 0 ? xirr(flows) : null;
+  const xirrPct = xr != null ? xr * 100 : null;
+
   return {
     hasData: true,
     startDate,
@@ -216,6 +249,10 @@ async function computeFund(userId) {
     usdFactor: usdNow,                                          // baslangictan bugune USD carpani (1->X)
     vsUsdPct,
     hasUsd: usdBase != null,
+    daysHeld,
+    twrCumPct,
+    twrAnnualPct,
+    xirrPct,
     series,
   };
 }

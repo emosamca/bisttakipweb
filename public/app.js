@@ -3412,6 +3412,18 @@ function renderFund(d) {
     $('fCardUsd').className = 'card-value';
     $('fCardUsdSub').textContent = d.hasUsd ? '' : 'Kur geçmişi yok';
   }
+  if (d.xirrPct != null) {
+    const xpos = d.xirrPct >= 0;
+    $('fCardXirr').textContent = `${xpos ? '▲' : '▼'} %${Math.abs(d.xirrPct).toFixed(2)}`;
+    $('fCardXirr').className = 'card-value ' + (xpos ? 'pos' : 'neg');
+  } else {
+    $('fCardXirr').textContent = '—';
+    $('fCardXirr').className = 'card-value';
+  }
+  $('fCardXirrSub').textContent =
+    d.twrAnnualPct != null
+      ? `TWR yıllık: %${d.twrAnnualPct.toFixed(2)} · ${d.daysHeld} gün`
+      : '';
   renderFundChart(d.series);
   renderFundMonthly(d.series);
 }
