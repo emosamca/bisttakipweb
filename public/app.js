@@ -913,7 +913,8 @@ function renderBudgetChart(series) {
     filterByRange(series, genRangeState.genBudgetRange),
     (s) => Number(s.total),
     '#2f81f7',
-    'rgba(47,129,247,0.12)'
+    'rgba(47,129,247,0.12)',
+    'Toplam'
   );
 }
 
@@ -925,11 +926,12 @@ function renderPortfolioChart(series) {
     filterByRange(series, genRangeState.genPortfolioRange),
     (s) => Number(s.total) - (Number(s.cash) || 0),
     '#3fb950',
-    'rgba(63,185,80,0.12)'
+    'rgba(63,185,80,0.12)',
+    'Portföy'
   );
 }
 
-function renderTimeChart(boxId, series, valueFn, stroke, fill) {
+function renderTimeChart(boxId, series, valueFn, stroke, fill, tipLabel = 'Değer') {
   const box = $(boxId);
   if (!box) return;
   if (!series || series.length < 2) {
@@ -959,6 +961,82 @@ function renderTimeChart(boxId, series, valueFn, stroke, fill) {
     <text class="xtick" x="${pad.l}" y="${H - 8}" style="text-anchor:start">${shortDate(series[0].date)}</text>
     <text class="xtick" x="${W - pad.r}" y="${H - 8}" style="text-anchor:end">${shortDate(series[series.length - 1].date)}</text>
   </svg>`;
+  attachChartTooltip(box, {
+    series, W, H, pad, X,
+    rows: (s) => {
+      const v = valueFn(s);
+      return [{ label: tipLabel, color: stroke, y: Y(v), text: tl(v) }];
+    },
+  });
+}
+
+// Genel amacli grafik tooltip'i: fare gezerken dikey kilavuz cizgisi, seri
+// noktalari ve tarih+deger kutusu. renderValueChart'taki kalibin yeniden
+// kullanilabilir hali. cfg: { series, W, H, pad, X(i), rows(s)->[{label,color,y,text}] }
+function attachChartTooltip(box, cfg) {
+  const svg = box.querySelector('svg');
+  if (!svg) return;
+  const NS = 'http://www.w3.org/2000/svg';
+  const { series, W, H, pad } = cfg;
+  const innerH = H - pad.t - pad.b;
+  const vline = document.createElementNS(NS, 'line');
+  vline.setAttribute('class', 'vline');
+  vline.setAttribute('y1', pad.t);
+  vline.setAttribute('y2', pad.t + innerH);
+  vline.style.display = 'none';
+  svg.appendChild(vline);
+  const dots = [];
+  const tip = document.createElement('div');
+  tip.className = 'vc-tip';
+  tip.style.display = 'none';
+  box.appendChild(tip);
+  svg.addEventListener('mousemove', (e) => {
+    const rect = svg.getBoundingClientRect();
+    const fx = (e.clientX - rect.left) / rect.width;
+    const fStart = pad.l / W, fEnd = (W - pad.r) / W;
+    let f = (fx - fStart) / (fEnd - fStart);
+    f = Math.max(0, Math.min(1, f));
+    const idx = Math.round(f * (series.length - 1));
+    const s = series[idx];
+    const px = cfg.X(idx);
+    const rows = cfg.rows(s);
+    vline.setAttribute('x1', px);
+    vline.setAttribute('x2', px);
+    vline.style.display = '';
+    // satir sayisi kadar nokta olustur (bir kez), sonra konumla
+    while (dots.length < rows.length) {
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('r', 4);
+      c.setAttribute('stroke', '#0d1117');
+      c.setAttribute('stroke-width', '1.5');
+      c.style.display = 'none';
+      svg.appendChild(c);
+      dots.push(c);
+    }
+    dots.forEach((d) => (d.style.display = 'none'));
+    let topY = Infinity;
+    rows.forEach((r, i) => {
+      if (r.y == null) return;
+      const d = dots[i];
+      d.setAttribute('cx', px);
+      d.setAttribute('cy', r.y);
+      d.setAttribute('fill', r.color);
+      d.style.display = '';
+      if (r.y < topY) topY = r.y;
+    });
+    if (topY === Infinity) topY = pad.t + innerH / 2;
+    tip.innerHTML =
+      `<strong>${shortDate(s.date)}</strong>` +
+      rows.map((r) => `<br><span style="color:${r.color}">${r.label}:</span> ${r.text}`).join('');
+    tip.style.display = '';
+    tip.style.left = `${(px / W) * rect.width}px`;
+    tip.style.top = `${(topY / H) * rect.height}px`;
+  });
+  svg.addEventListener('mouseleave', () => {
+    vline.style.display = 'none';
+    tip.style.display = 'none';
+    dots.forEach((d) => (d.style.display = 'none'));
+  });
 }
 
 // ---- Veri yenileme ----
@@ -3533,6 +3611,18 @@ function renderFundChart(series) {
     '<span class="cl-item"><span class="cl-line" style="background:#8b949e"></span>Maliyet</span>' +
     (hasInfl ? '<span class="cl-item"><span class="cl-line" style="background:#d29922"></span>Enflasyon</span>' : '') +
     (hasUsd ? '<span class="cl-item"><span class="cl-line" style="background:#3fb950"></span>USD</span>' : '');
+  attachChartTooltip(box, {
+    series, W, H, pad, X,
+    rows: (s) => {
+      const rows = [
+        { label: 'Birim Fiyat', color: '#2f81f7', y: Y(s.price), text: `₺${fund4(s.price)}` },
+        { label: 'Maliyet', color: '#8b949e', y: Y(s.avgCost), text: `₺${fund4(s.avgCost)}` },
+      ];
+      if (s.inflation != null) rows.push({ label: 'Enflasyon', color: '#d29922', y: Y(s.inflation), text: `₺${fund4(s.inflation)}` });
+      if (s.usd != null) rows.push({ label: 'USD', color: '#3fb950', y: Y(s.usd), text: `₺${fund4(s.usd)}` });
+      return rows;
+    },
+  });
 }
 
 function renderFundMonthly(series) {
