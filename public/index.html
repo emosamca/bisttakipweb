@@ -1476,17 +1476,22 @@
       <label>Haftalık Rapor Chat ID <span class="card-sub" style="font-weight:400">(opsiyonel)</span>
         <input type="text" id="tgWeeklyChatId" autocomplete="off" placeholder="boş = günlük ile aynı" />
       </label>
+      <label>Aylık Rapor Chat ID <span class="card-sub" style="font-weight:400">(opsiyonel)</span>
+        <input type="text" id="tgMonthlyChatId" autocomplete="off" placeholder="boş = günlük ile aynı" />
+      </label>
       <div class="info-box">
         Her gün <strong>21:00</strong>'de portföy özeti gönderilir. Chat ID'nizi öğrenmek için Telegram'da
         <strong>@userinfobot</strong>'a yazın; ayrıca botumuza (bir kez) mesaj atmanız gerekir.
         Boş bırakıp kaydederseniz bildirim kapanır.
         <br><strong>Haftalık Rapor Chat ID</strong> girilirse haftalık özet oraya gönderilir; boş bırakılırsa günlük ile aynı yere gider.
+        <br><strong>Aylık Rapor Chat ID</strong> girilirse ayın son günü 21:00'deki aylık özet oraya gönderilir; boş bırakılırsa günlük ile aynı yere gider.
         <span id="tgBotWarn" class="neg hidden"><br>⚠ Sunucuda bot tanımlı değil (BOT_TOKEN).</span>
       </div>
       <div class="modal-foot" style="flex-wrap:wrap; gap:8px">
         <button type="button" class="btn ghost" id="tgTest">Test Mesajı</button>
         <button type="button" class="btn" id="tgSendNow">📤 Günlük Gönder</button>
         <button type="button" class="btn" id="tgSendWeekly">📅 Haftalık Gönder</button>
+        <button type="button" class="btn" id="tgSendMonthly">🗓 Aylık Gönder</button>
         <button type="submit" class="btn primary">Kaydet</button>
       </div>
       <div id="tgMsg" class="card-sub"></div>

@@ -1665,6 +1665,99 @@ async function buildWeeklySummaryText(userId) {
   ].join('\n');
 }
 
+// Aylik kiyas referansi: icinde bulunulan aydan ONCEKI son snapshot;
+// yoksa (ilk ay) en eski snapshot.
+async function getMonthlyBaseline(userId) {
+  const today = localDateStr();
+  let r = await db.query(
+    `SELECT * FROM portfolio_snapshots
+      WHERE user_id=$1 AND snap_date < date_trunc('month', $2::date)
+      ORDER BY snap_date DESC LIMIT 1`,
+    [userId, today]
+  );
+  if (r.rows.length) return r.rows[0];
+  r = await db.query('SELECT * FROM portfolio_snapshots WHERE user_id=$1 ORDER BY snap_date ASC LIMIT 1', [userId]);
+  return r.rows[0] || null;
+}
+
+// Aylik ozet metni. Yeterli gecmis yoksa null doner.
+async function buildMonthlySummaryText(userId) {
+  const base = await getMonthlyBaseline(userId);
+  if (!base) return null;
+  const today = localDateStr();
+  if (base.snap_date >= today) return null; // kiyaslanacak gecmis yok
+  const g = await computeGenelTotals(userId);
+  const monthLabel = new Date(today).toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
+
+  // En iyi / en kotu varlik: ay basindan bugune yuzdesel degisim (baz > 0 olan siniflar)
+  const classes = [
+    { name: 'BIST', emoji: '🏦', cur: g.bist, prev: Number(base.bist) },
+    { name: 'ABD', emoji: '🇺🇸', cur: g.us, prev: Number(base.us) },
+    { name: 'Maden', emoji: '🥇', cur: g.metal, prev: Number(base.metal) },
+    { name: 'Döviz', emoji: '💱', cur: g.curr, prev: Number(base.currency) },
+    { name: 'Kripto', emoji: '🪙', cur: g.crypto, prev: Number(base.crypto) },
+    { name: 'Fon', emoji: '🟣', cur: g.fund, prev: Number(base.fund) },
+    { name: 'Binance', emoji: '🟡', cur: g.binance, prev: Number(base.binance) },
+  ]
+    .filter((c) => c.prev > 0)
+    .map((c) => ({ ...c, pct: ((c.cur - c.prev) / c.prev) * 100 }));
+  classes.sort((a, b) => b.pct - a.pct);
+  const best = classes[0];
+  const worst = classes.length > 1 ? classes[classes.length - 1] : null;
+  const pctTxt = (p) => `${p >= 0 ? '+' : '-'}%${Math.abs(p).toFixed(2)}`;
+
+  // Bu ayin temettuleri: BIST (TL) + ABD (USD)
+  const divTl = Number(
+    (
+      await db.query(
+        `SELECT COALESCE(SUM(amount),0) v FROM cash_movements
+          WHERE user_id=$1 AND kind='dividend'
+            AND move_date >= date_trunc('month', $2::date) AND move_date <= $2`,
+        [userId, today]
+      )
+    ).rows[0].v
+  );
+  const divUsd = Number(
+    (
+      await db.query(
+        `SELECT COALESCE(SUM(amount),0) v FROM us_cash_movements
+          WHERE user_id=$1 AND kind='dividend'
+            AND move_date >= date_trunc('month', $2::date) AND move_date <= $2`,
+        [userId, today]
+      )
+    ).rows[0].v
+  );
+  const divParts = [];
+  if (divTl > 0) divParts.push(tlFmt(divTl));
+  if (divUsd > 0) divParts.push(`$${divUsd.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`);
+  const divTxt = divParts.length ? divParts.join(' + ') : 'yok';
+
+  const totalDelta = g.total - Number(base.total_try);
+  const totalSign = totalDelta >= 0 ? '+' : '-';
+  return [
+    `🗓 <b>Aylık Özet — ${monthLabel}</b>`,
+    `<i>${new Date(base.snap_date).toLocaleDateString('tr-TR')} → ${new Date(today).toLocaleDateString('tr-TR')}</i>`,
+    '',
+    `🏦 BIST: <b>${tlFmt(g.bist)}</b>${deltaStr(g.bist, base.bist)}`,
+    `🇺🇸 ABD: <b>${tlFmt(g.us)}</b>${deltaStr(g.us, base.us)}`,
+    `🥇 Maden: <b>${tlFmt(g.metal)}</b>${deltaStr(g.metal, base.metal)}`,
+    `💱 Döviz: <b>${tlFmt(g.curr)}</b>${deltaStr(g.curr, base.currency)}`,
+    `🪙 Kripto: <b>${tlFmt(g.crypto)}</b>${deltaStr(g.crypto, base.crypto)}`,
+    `🟣 Fon: <b>${g.fund ? tlFmt(g.fund) : '—'}</b>${g.fund ? deltaStr(g.fund, base.fund || 0) : ''}`,
+    `💵 Nakit: <b>${tlFmt(g.cashTRY)}</b>${deltaStr(g.cashTRY, base.cash)}`,
+    `🟡 Binance: <b>${g.binance ? tlFmt(g.binance) : '—'}</b>${g.binance ? deltaStr(g.binance, base.binance) : ''}`,
+    '━━━━━━━━━━',
+    `💰 <b>Toplam Bütçe: ${tlFmt(g.total)}</b>${deltaStr(g.total, base.total_try)}`,
+    `   Δ ${totalSign}${tlFmt(Math.abs(totalDelta))}`,
+    '',
+    best ? `🏆 En iyi: <b>${best.emoji} ${best.name}</b> (${pctTxt(best.pct)})` : null,
+    worst ? `🐢 En kötü: <b>${worst.emoji} ${worst.name}</b> (${pctTxt(worst.pct)})` : null,
+    `💰 Bu ay temettü: <b>${divTxt}</b>`,
+  ]
+    .filter((x) => x !== null)
+    .join('\n');
+}
+
 // Genel zaman grafigi icin snapshot serisi
 app.get('/api/snapshots', requireAuth, async (req, res) => {
   try {
@@ -1830,10 +1923,11 @@ app.get('/api/achievements', requireAuth, async (req, res) => {
 
 app.get('/api/telegram', requireAuth, async (req, res) => {
   try {
-    const r = await db.query('SELECT chat_id, weekly_chat_id FROM telegram_settings WHERE user_id=$1', [req.session.userId]);
+    const r = await db.query('SELECT chat_id, weekly_chat_id, monthly_chat_id FROM telegram_settings WHERE user_id=$1', [req.session.userId]);
     res.json({
       chatId: (r.rows[0] && r.rows[0].chat_id) || '',
       weeklyChatId: (r.rows[0] && r.rows[0].weekly_chat_id) || '',
+      monthlyChatId: (r.rows[0] && r.rows[0].monthly_chat_id) || '',
       botConfigured: telegram.configured(),
     });
   } catch (err) {
@@ -1845,15 +1939,17 @@ app.get('/api/telegram', requireAuth, async (req, res) => {
 app.put('/api/telegram', requireAuth, async (req, res) => {
   const chatId = ((req.body && req.body.chatId) || '').trim();
   const weeklyChatId = ((req.body && req.body.weeklyChatId) || '').trim();
+  const monthlyChatId = ((req.body && req.body.monthlyChatId) || '').trim();
   try {
     if (!chatId) {
       await db.query('DELETE FROM telegram_settings WHERE user_id=$1', [req.session.userId]);
       return res.json({ ok: true, removed: true });
     }
     await db.query(
-      `INSERT INTO telegram_settings (user_id, chat_id, weekly_chat_id, updated_at) VALUES ($1,$2,$3, now())
-       ON CONFLICT (user_id) DO UPDATE SET chat_id=EXCLUDED.chat_id, weekly_chat_id=EXCLUDED.weekly_chat_id, updated_at=now()`,
-      [req.session.userId, chatId, weeklyChatId || null]
+      `INSERT INTO telegram_settings (user_id, chat_id, weekly_chat_id, monthly_chat_id, updated_at) VALUES ($1,$2,$3,$4, now())
+       ON CONFLICT (user_id) DO UPDATE SET chat_id=EXCLUDED.chat_id, weekly_chat_id=EXCLUDED.weekly_chat_id,
+         monthly_chat_id=EXCLUDED.monthly_chat_id, updated_at=now()`,
+      [req.session.userId, chatId, weeklyChatId || null, monthlyChatId || null]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -1913,6 +2009,27 @@ app.post('/api/telegram/send-weekly-now', requireAuth, async (req, res) => {
   }
 });
 
+// Kullanici isterse o anda aylik ozeti gonder (yeterli gecmis yoksa uyarir)
+app.post('/api/telegram/send-monthly-now', requireAuth, async (req, res) => {
+  if (!telegram.configured()) return res.status(400).json({ error: 'Sunucuda BOT_TOKEN tanımlı değil' });
+  let chatId = ((req.body && req.body.chatId) || '').trim();
+  if (!chatId) {
+    const row = (await db.query('SELECT chat_id, monthly_chat_id FROM telegram_settings WHERE user_id=$1', [req.session.userId])).rows[0];
+    chatId = row ? (row.monthly_chat_id || row.chat_id || '') : '';
+  }
+  if (!chatId) return res.status(400).json({ error: 'Önce chat_id girin' });
+  try {
+    const text = await buildMonthlySummaryText(req.session.userId);
+    if (!text) return res.status(400).json({ error: 'Aylık kıyas için yeterli geçmiş yok (en az 1 günlük snapshot gerekir; her gün birikir).' });
+    const r = await telegram.send(chatId, text);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Özet gönderilemedi' });
+  }
+});
+
 // Gunluk ozet zamanlayicisi (DAILY_SUMMARY_HOUR; varsayilan 21:00 sunucu yerel saati)
 const SUMMARY_HOUR = Number(process.env.DAILY_SUMMARY_HOUR || 21);
 // Haftalik ozet gunu (0=Pazar ... 6=Cumartesi); varsayilan 1 = Pazartesi
@@ -1958,6 +2075,27 @@ async function sendWeeklySummaries() {
   }
 }
 
+async function sendMonthlySummaries() {
+  if (!telegram.configured()) return;
+  let rows;
+  try {
+    rows = (await db.query('SELECT user_id, chat_id, monthly_chat_id FROM telegram_settings')).rows;
+  } catch (_) {
+    return;
+  }
+  for (const row of rows) {
+    // Aylik rapor: ayri chat id varsa oraya, yoksa ana chat_id'ye
+    const target = row.monthly_chat_id || row.chat_id;
+    if (!target) continue;
+    try {
+      const text = await buildMonthlySummaryText(row.user_id);
+      if (text) await telegram.send(target, text);
+    } catch (e) {
+      console.error('Telegram aylik ozet hatasi:', e.message);
+    }
+  }
+}
+
 // Kalici durum okuma/yazma (app_state key/value tablosu). Restart sonrasi
 // "bugun zaten gonderildi" bilgisi bellekte degil DB'de tutulur.
 async function getAppState(key) {
@@ -1993,6 +2131,14 @@ async function dailyTick() {
   if (now.getDay() === WEEKLY_DAY && (await getAppState('last_weekly_sent')) !== today) {
     await setAppState('last_weekly_sent', today);
     await sendWeeklySummaries(); // haftalik ozet gunu
+  }
+
+  // Aylik ozet: ayin SON gunu, ayda bir kez (kalici bayrak ay bazli 'YYYY-MM').
+  const isLastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() === now.getDate();
+  const ym = today.slice(0, 7);
+  if (isLastDayOfMonth && (await getAppState('last_monthly_sent')) !== ym) {
+    await setAppState('last_monthly_sent', ym);
+    await sendMonthlySummaries();
   }
 }
 

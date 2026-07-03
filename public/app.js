@@ -3213,6 +3213,7 @@ async function openTelegram() {
     const t = await api('/api/telegram');
     $('tgChatId').value = t.chatId || '';
     $('tgWeeklyChatId').value = t.weeklyChatId || '';
+    $('tgMonthlyChatId').value = t.monthlyChatId || '';
     $('tgBotWarn').classList.toggle('hidden', !!t.botConfigured);
   } catch (_) {}
   openModal('telegramModal');
@@ -3232,7 +3233,8 @@ $('telegramForm').addEventListener('submit', async (e) => {
   try {
     const chatId = $('tgChatId').value.trim();
     const weeklyChatId = $('tgWeeklyChatId').value.trim();
-    await api('/api/telegram', { method: 'PUT', body: JSON.stringify({ chatId, weeklyChatId }) });
+    const monthlyChatId = $('tgMonthlyChatId').value.trim();
+    await api('/api/telegram', { method: 'PUT', body: JSON.stringify({ chatId, weeklyChatId, monthlyChatId }) });
     tgShow(chatId ? 'Kaydedildi. Her gün 21:00 özet gelecek.' : 'Bildirim kapatıldı.', true);
   } catch (e2) {
     $('tgError').textContent = e2.message;
@@ -3273,6 +3275,20 @@ $('tgSendWeekly').addEventListener('click', async () => {
     const weeklyTarget = $('tgWeeklyChatId').value.trim() || $('tgChatId').value.trim();
     await api('/api/telegram/send-weekly-now', { method: 'POST', body: JSON.stringify({ chatId: weeklyTarget }) });
     tgShow('Haftalık özet gönderildi ✅', true);
+  } catch (e2) {
+    $('tgError').textContent = e2.message;
+    $('tgError').classList.remove('hidden');
+    $('tgMsg').textContent = '';
+  }
+});
+
+$('tgSendMonthly').addEventListener('click', async () => {
+  $('tgError').classList.add('hidden');
+  tgShow('Aylık özet gönderiliyor…', true);
+  try {
+    const monthlyTarget = $('tgMonthlyChatId').value.trim() || $('tgChatId').value.trim();
+    await api('/api/telegram/send-monthly-now', { method: 'POST', body: JSON.stringify({ chatId: monthlyTarget }) });
+    tgShow('Aylık özet gönderildi ✅', true);
   } catch (e2) {
     $('tgError').textContent = e2.message;
     $('tgError').classList.remove('hidden');

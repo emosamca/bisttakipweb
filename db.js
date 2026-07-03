@@ -350,6 +350,9 @@ ALTER TABLE portfolio_snapshots ADD COLUMN IF NOT EXISTS fund NUMERIC(20,4) NOT 
 -- Haftalik raporlar icin ayri chat id (bos ise ana chat_id'ye gonderilir)
 ALTER TABLE telegram_settings ADD COLUMN IF NOT EXISTS weekly_chat_id TEXT;
 
+-- Aylik raporlar icin ayri chat id (bos ise ana chat_id'ye gonderilir)
+ALTER TABLE telegram_settings ADD COLUMN IF NOT EXISTS monthly_chat_id TEXT;
+
 -- Gecmisi olmayan kullanicilar icin mevcut parolayi gecmise tohumla
 INSERT INTO password_history (user_id, password)
 SELECT id, password FROM users u
