@@ -232,6 +232,7 @@ CREATE TABLE IF NOT EXISTS fund_prices (
   code        TEXT PRIMARY KEY,                               -- fon kodu (orn 'AFA')
   title       TEXT,                                           -- fon adi/unvani
   price       NUMERIC(18,6) NOT NULL CHECK (price >= 0),      -- anlik pay fiyati (TL)
+  price_old   NUMERIC(18,6) NOT NULL DEFAULT 0 CHECK (price_old >= 0), -- price 0 gelirse yedek olarak kullanilir
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -352,6 +353,9 @@ ALTER TABLE telegram_settings ADD COLUMN IF NOT EXISTS weekly_chat_id TEXT;
 
 -- Aylik raporlar icin ayri chat id (bos ise ana chat_id'ye gonderilir)
 ALTER TABLE telegram_settings ADD COLUMN IF NOT EXISTS monthly_chat_id TEXT;
+
+-- Fon fiyati servisten 0 gelirse yedek olarak kullanilacak onceki fiyat
+ALTER TABLE fund_prices ADD COLUMN IF NOT EXISTS price_old NUMERIC(18,6) NOT NULL DEFAULT 0;
 
 -- Gecmisi olmayan kullanicilar icin mevcut parolayi gecmise tohumla
 INSERT INTO password_history (user_id, password)

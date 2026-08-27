@@ -6,11 +6,22 @@ function normCode(code) {
   return String(code || '').trim().toUpperCase();
 }
 
-// code -> { price, title }
+// price 0 gelmisse (servis henuz guncelleyememis) price_old'a dus
+function effectivePrice(row) {
+  const price = Number(row.price);
+  const priceOld = Number(row.price_old);
+  const isOld = price <= 0 && priceOld > 0;
+  return { price: isOld ? priceOld : price, isOld };
+}
+
+// code -> { price, title, isOld }
 async function priceMap() {
-  const r = await db.query('SELECT code, price, title FROM fund_prices');
+  const r = await db.query('SELECT code, price, price_old, title FROM fund_prices');
   const m = {};
-  r.rows.forEach((x) => (m[x.code] = { price: Number(x.price), title: x.title || '' }));
+  r.rows.forEach((x) => {
+    const { price, isOld } = effectivePrice(x);
+    m[x.code] = { price, isOld, title: x.title || '' };
+  });
   return m;
 }
 
@@ -50,6 +61,7 @@ async function summary(userId) {
     const p = prices[h.code];
     h.title = p ? p.title : '';
     h.currentPrice = p && p.price > 0 ? p.price : null;
+    h.priceIsOld = !!(h.currentPrice !== null && p.isOld);
     h.currentValue = h.currentPrice !== null ? h.currentPrice * h.quantity : null;
     h.profit = h.currentValue !== null ? h.currentValue - h.costBasis : null;
     h.profitPct = h.currentValue !== null && h.costBasis > 0 ? ((h.currentValue - h.costBasis) / h.costBasis) * 100 : null;
@@ -68,8 +80,11 @@ async function summary(userId) {
 }
 
 async function pricesList() {
-  const r = await db.query('SELECT code, title, price, updated_at FROM fund_prices ORDER BY code');
-  return r.rows.map((x) => ({ code: x.code, title: x.title || '', price: Number(x.price), updated_at: x.updated_at }));
+  const r = await db.query('SELECT code, title, price, price_old, updated_at FROM fund_prices ORDER BY code');
+  return r.rows.map((x) => {
+    const { price, isOld } = effectivePrice(x);
+    return { code: x.code, title: x.title || '', price, priceIsOld: isOld, updated_at: x.updated_at };
+  });
 }
 
 module.exports = { normCode, priceMap, holdingsBeforeDate, holdings, summary, pricesList };

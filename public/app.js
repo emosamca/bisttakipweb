@@ -3119,6 +3119,7 @@ $('bnRefresh').addEventListener('click', binanceLoadPortfolio);
 // ===================== TEFAS FON (alim) =====================
 // Fon birim fiyatlari 6 ondalik gosterilir
 const fprice = (n) => '₺' + new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 6, maximumFractionDigits: 6 }).format(Number(n) || 0);
+const priceOldFlag = (isOld) => (isOld ? '<span class="price-old-flag" title="Servisten güncel fiyat gelmedi; önceki fiyat gösteriliyor">!</span>' : '');
 
 async function fundsRefreshAll() {
   await Promise.all([fundsLoadSummary(), fundsLoadPrices(), fundsLoadPurchases()]);
@@ -3157,7 +3158,7 @@ async function fundsLoadSummary() {
         <td class="muted">${esc(h.title || '')}</td>
         <td class="num">${num(h.quantity)}</td>
         <td class="num">${fprice(h.avgCost)}</td>
-        <td class="num">${h.currentPrice != null ? fprice(h.currentPrice) : '<span class="muted">—</span>'}</td>
+        <td class="num">${h.currentPrice != null ? fprice(h.currentPrice) + priceOldFlag(h.priceIsOld) : '<span class="muted">—</span>'}</td>
         <td class="num">${tl(h.costBasis)}</td>
         <td class="num">${h.currentValue != null ? tl(h.currentValue) : '<span class="muted">—</span>'}</td>
         <td class="num">${pl}</td>
@@ -3175,7 +3176,7 @@ async function fundsLoadPrices() {
           (r) => `<tr>
         <td><strong>${esc(r.code)}</strong></td>
         <td class="muted">${esc(r.title || '')}</td>
-        <td class="num">${r.price > 0 ? fprice(r.price) : '<span class="muted">—</span>'}</td>
+        <td class="num">${r.price > 0 ? fprice(r.price) + priceOldFlag(r.priceIsOld) : '<span class="muted">—</span>'}</td>
         <td class="muted">${r.updated_at ? new Date(r.updated_at).toLocaleString('tr-TR') : '—'}</td>
       </tr>`
         )

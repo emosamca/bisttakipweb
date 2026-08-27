@@ -157,6 +157,7 @@ input:focus, select:focus { border-color: var(--primary); }
 #genTotalUsd .ng-val { white-space: nowrap; }
 .pos { color: var(--green) !important; }
 .neg { color: var(--red) !important; }
+.price-old-flag { color: var(--yellow); font-weight: 700; margin-left: 3px; cursor: help; }
 
 /* ---- Panels & tables ---- */
 .panel { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 20px; }
