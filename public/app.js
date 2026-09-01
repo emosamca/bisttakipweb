@@ -3563,6 +3563,19 @@ $('tgSendWeekly').addEventListener('click', async () => {
   }
 });
 
+$('tgSendFund').addEventListener('click', async () => {
+  $('tgError').classList.add('hidden');
+  tgShow('Fon fiyatları gönderiliyor…', true);
+  try {
+    await api('/api/telegram/send-fund-now', { method: 'POST', body: JSON.stringify({ chatId: $('tgChatId').value.trim() }) });
+    tgShow('Fon fiyatları gönderildi ✅', true);
+  } catch (e2) {
+    $('tgError').textContent = e2.message;
+    $('tgError').classList.remove('hidden');
+    $('tgMsg').textContent = '';
+  }
+});
+
 $('tgSendMonthly').addEventListener('click', async () => {
   $('tgError').classList.add('hidden');
   tgShow('Aylık özet gönderiliyor…', true);

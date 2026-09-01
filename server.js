@@ -2224,6 +2224,152 @@ app.post('/api/telegram/send-monthly-now', requireAuth, async (req, res) => {
   }
 });
 
+// ---- Fon fiyati aciklaninca Telegram bildirimi ----
+// Servis TEFAS fiyatini fund_prices'a yazdiginda (price > 0) gunluk raporun
+// gittigi kanala fiyat + degisim duser. Fiyat gelmediyse (price = 0) mesaj
+// atilmaz; servis fiyat gelene kadar tekrar denedigi icin geldigi an tetiklenir.
+// Ayni fon icin gunde bir kez gonderilir (app_state'te kalici bayrak).
+const fundPriceFmt = (n) =>
+  new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 6, maximumFractionDigits: 6 }).format(Number(n) || 0);
+
+function escHtml(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Onceki fiyat kaynagi: en son DUYURULAN fiyat (app_state'te 'gun|fiyat').
+// price_old'a guvenilmiyor — servis onu guncel fiyatin kopyasi olarak da
+// yazabiliyor; yalnizca elde kayit yokken ve price'tan FARKLIYSA kullanilir.
+const FUND_PREV_KEY = (code) => `fund_prev_price:${code}`;
+
+async function fundPrevPrice(row, today) {
+  const raw = await getAppState(FUND_PREV_KEY(row.code));
+  if (raw) {
+    const [day, val] = String(raw).split('|');
+    const v = Number(val);
+    if (day && day < today && v > 0) return v; // onceki gunun duyurulan fiyati
+    if (day === today) return null; // bugun zaten kaydedildi -> kiyas yapma
+  }
+  const old = Number(row.price_old);
+  return old > 0 && old !== Number(row.price) ? old : null;
+}
+
+// rows: [{code, title, price, prev}] — prev null ise degisim satiri yazilmaz
+function buildFundPriceText(rows, dateStr) {
+  const [y, m, d] = dateStr.split('-');
+  const lines = [`🧺 <b>Fon Fiyatları Açıklandı</b> — ${d}.${m}.${y}`, ''];
+  rows.forEach((r) => {
+    const price = Number(r.price);
+    const prev = Number(r.prev);
+    lines.push(`🟣 <b>${escHtml(r.code)}</b>${r.title ? ' — ' + escHtml(r.title) : ''}`);
+    if (prev > 0) {
+      const diff = price - prev;
+      const pct = (diff / prev) * 100;
+      const up = diff >= 0;
+      lines.push(
+        `   <b>₺${fundPriceFmt(price)}</b> ${up ? '🟢' : '🔴'} ${up ? '+' : '-'}%${Math.abs(pct).toFixed(2)}` +
+          ` (önceki ₺${fundPriceFmt(prev)})`
+      );
+    } else {
+      lines.push(`   <b>₺${fundPriceFmt(price)}</b>`);
+    }
+  });
+  return lines.join('\n');
+}
+
+// Kullanicinin sahip oldugu fonlardan BUGUN fiyati aciklananlar (price > 0).
+// updated_at kontrolu: hafta sonu duran eski fiyat yeniden duyurulmasin.
+async function todaysFundPrices(userId, today) {
+  const r = await db.query(
+    `SELECT fp.code, fp.title, fp.price, fp.price_old, fp.updated_at
+       FROM fund_prices fp
+      WHERE fp.price > 0
+        AND EXISTS (SELECT 1 FROM fund_purchases p WHERE p.user_id=$1 AND p.code=fp.code)
+      ORDER BY fp.code`,
+    [userId]
+  );
+  return r.rows.filter((x) => localDateStr(new Date(x.updated_at)) === today);
+}
+
+async function announceFundPrices() {
+  if (!telegram.configured()) return;
+  const today = localDateStr();
+  let rows;
+  try {
+    rows = (await db.query('SELECT user_id, chat_id FROM telegram_settings')).rows;
+  } catch (_) {
+    return;
+  }
+  // Fiyat tum kullanicilar icin ortak: onceki fiyat bir kez cozulur, bugunku
+  // fiyat da tur sonunda bir kez kaydedilir (ikinci kullanicinin mesaji da
+  // dogru kiyasi gorsun diye tur ortasinda uzerine yazilmaz).
+  const prevCache = new Map();
+  const toStore = new Map();
+  for (const row of rows) {
+    if (!row.chat_id) continue;
+    try {
+      const priced = await todaysFundPrices(row.user_id, today);
+      const fresh = [];
+      for (const p of priced) {
+        const key = `fund_msg:${row.user_id}:${p.code}`;
+        if ((await getAppState(key)) === today) continue; // bu fon bugun gonderildi
+        if (!prevCache.has(p.code)) prevCache.set(p.code, await fundPrevPrice(p, today));
+        fresh.push({ p: { ...p, prev: prevCache.get(p.code) }, key });
+      }
+      if (!fresh.length) continue;
+      const sent = await telegram.send(row.chat_id, buildFundPriceText(fresh.map((f) => f.p), today));
+      if (!sent.ok) {
+        console.error('Telegram fon fiyat mesaji hatasi:', sent.error);
+        continue; // bayragi isaretleme; sonraki tetikte tekrar denenir
+      }
+      for (const f of fresh) {
+        await setAppState(f.key, today);
+        toStore.set(f.p.code, Number(f.p.price));
+      }
+    } catch (e) {
+      console.error('Fon fiyat bildirimi hatasi (user ' + row.user_id + '):', e.message);
+    }
+  }
+  // Duyurulan fiyatlari "onceki fiyat" olarak sakla (yarinki kiyasin tabani)
+  for (const [code, price] of toStore) {
+    await setAppState(FUND_PREV_KEY(code), `${today}|${price}`);
+  }
+}
+
+// Servis fiyatlari toplu yazabildiginden bildirimi kisa sure biriktirip
+// tek mesajda gonder (her fon icin ayri mesaj atilmasin).
+let fundAnnounceTimer = null;
+function scheduleFundPriceAnnounce() {
+  clearTimeout(fundAnnounceTimer);
+  fundAnnounceTimer = setTimeout(() => {
+    announceFundPrices().catch((e) => console.error('Fon fiyat bildirimi hatasi:', e.message));
+  }, 10000);
+}
+
+// Kullanici isterse o anda bugunku fon fiyatlarini gonder (gunluk bayragi degistirmez)
+app.post('/api/telegram/send-fund-now', requireAuth, async (req, res) => {
+  if (!telegram.configured()) return res.status(400).json({ error: 'Sunucuda BOT_TOKEN tanımlı değil' });
+  let chatId = ((req.body && req.body.chatId) || '').trim();
+  if (!chatId) {
+    const row = (await db.query('SELECT chat_id FROM telegram_settings WHERE user_id=$1', [req.session.userId])).rows[0];
+    chatId = row && row.chat_id ? row.chat_id : '';
+  }
+  if (!chatId) return res.status(400).json({ error: 'Önce chat_id girin' });
+  try {
+    const today = localDateStr();
+    const priced = await todaysFundPrices(req.session.userId, today);
+    if (!priced.length) return res.status(400).json({ error: 'Bugün fiyatı açıklanan fonunuz yok (fiyat gelince otomatik gönderilir).' });
+    // Onizleme/test: gunluk bayraklari ve "onceki fiyat" kaydini degistirmez
+    const withPrev = [];
+    for (const p of priced) withPrev.push({ ...p, prev: await fundPrevPrice(p, today) });
+    const r = await telegram.send(chatId, buildFundPriceText(withPrev, today));
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json({ ok: true, count: priced.length });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Fon fiyatları gönderilemedi' });
+  }
+});
+
 // Gunluk ozet zamanlayicisi (DAILY_SUMMARY_HOUR; varsayilan 21:00 sunucu yerel saati)
 const SUMMARY_HOUR = Number(process.env.DAILY_SUMMARY_HOUR || 21);
 // Haftalik ozet gunu (0=Pazar ... 6=Cumartesi); varsayilan 1 = Pazartesi
@@ -2515,10 +2661,15 @@ async function ensureDefaultUser() {
     await db.listen('crypto_price_change', () => {
       broadcast('crypto_price_change', { at: Date.now() });
     });
-    // TEFAS fon fiyati degisince fon panosunu guncelle
+    // TEFAS fon fiyati degisince fon panosunu guncelle + Telegram bildirimi
     await db.listen('fund_price_change', () => {
       broadcast('fund_price_change', { at: Date.now() });
+      scheduleFundPriceAnnounce();
     });
+    // Sunucu fiyat yazildigi sirada kapaliysa acilista bir kez telafi et
+    setTimeout(() => {
+      announceFundPrices().catch((e) => console.error('Fon fiyat bildirimi hatasi:', e.message));
+    }, 15000);
     // Binance toplamlarini 5 dakikada bir yenile (sunucu tarafi; secret burada kalir)
     setTimeout(refreshAllBinance, 10000); // baslangictan 10 sn sonra ilk cekim
     setInterval(refreshAllBinance, 5 * 60 * 1000);
