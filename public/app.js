@@ -1837,6 +1837,7 @@ $('dividendForm').addEventListener('submit', async (e) => {
 // ===================== ABD (US) DASHBOARD =====================
 function switchDash(which) {
   const isGenel = which === 'genel';
+  const isGenelPct = which === 'genelpct';
   const isBist = which === 'bist';
   const isFund = which === 'fund';
   const isUs = which === 'us';
@@ -1847,6 +1848,7 @@ function switchDash(which) {
   const isBinance = which === 'binance';
   const isAchv = which === 'achv';
   $('genelDash').classList.toggle('hidden', !isGenel);
+  $('genelPctDash').classList.toggle('hidden', !isGenelPct);
   $('bistDash').classList.toggle('hidden', !isBist);
   $('fundDash').classList.toggle('hidden', !isFund);
   $('usDash').classList.toggle('hidden', !isUs);
@@ -1867,6 +1869,7 @@ function switchDash(which) {
   $('cryptoMenu').classList.toggle('hidden', !isCrypto);
   $('fundsMenu').classList.toggle('hidden', !isFunds);
   $('tabGenel').classList.toggle('active', isGenel);
+  $('tabGenelPct').classList.toggle('active', isGenelPct);
   $('tabBist').classList.toggle('active', isBist);
   $('tabFund').classList.toggle('active', isFund);
   $('tabUs').classList.toggle('active', isUs);
@@ -1885,8 +1888,10 @@ function switchDash(which) {
   if (isBinance) binanceLoad();
   if (isAchv) achievementsLoad();
   if (isGenel) genelLoadSummary();
+  if (isGenelPct) genelPctLoad();
 }
 $('tabGenel').addEventListener('click', () => switchDash('genel'));
+$('tabGenelPct').addEventListener('click', () => switchDash('genelpct'));
 $('tabBist').addEventListener('click', () => switchDash('bist'));
 $('tabFund').addEventListener('click', () => switchDash('fund'));
 $('tabUs').addEventListener('click', () => switchDash('us'));
@@ -1998,6 +2003,7 @@ async function genelLoadSummary() {
 }
 function maybeRefreshGenel() {
   if (!$('genelDash').classList.contains('hidden')) genelLoadSummary();
+  if (!$('genelPctDash').classList.contains('hidden')) genelPctLoad();
 }
 
 // Bir kartin altina K/Z yuzdesini renkli yaz (profit/cost). Veri yoksa bos birak.
@@ -2013,6 +2019,166 @@ function pctSub(elId, profit, cost) {
   el.textContent = `${up ? '▲' : '▼'} %${Math.abs(pct).toFixed(2)}`;
   el.className = 'card-sub ' + (up ? 'pos' : 'neg');
 }
+
+// ===================== GENEL% (yuzdelik gidisat) =====================
+// Kartlar Genel sekmesindeki gibi meblag + yuzde gosterir; grafikler ise
+// MEBLAG DEGIL portfoyun toplam K/Z yuzdesini cizer. Boylece ayin 1'inde
+// yapilan para eklemeleri grafigi sicratmaz, gercek gidisat gorunur.
+const GP_DEFS = [
+  { key: 'bist', color: '#2f81f7', valId: 'gpBistVal', pctId: 'gpBistPct', chartId: 'gpBistChart', label: 'BIST' },
+  { key: 'us', color: '#3fb950', valId: 'gpUsVal', pctId: 'gpUsPct', chartId: 'gpUsChart', label: 'ABD' },
+  { key: 'metal', color: '#d29922', valId: 'gpMetalVal', pctId: 'gpMetalPct', chartId: 'gpMetalChart', label: 'Maden' },
+  { key: 'currency', color: '#a371f7', valId: 'gpCurrencyVal', pctId: 'gpCurrencyPct', chartId: 'gpCurrencyChart', label: 'Döviz' },
+  { key: 'crypto', color: '#f0883e', valId: 'gpCryptoVal', pctId: 'gpCryptoPct', chartId: 'gpCryptoChart', label: 'Kripto' },
+  { key: 'fund', color: '#db61a2', valId: 'gpFundVal', pctId: 'gpFundPct', chartId: 'gpFundChart', label: 'Fon' },
+  { key: 'total', color: '#2f81f7', valId: 'gpTotalVal', pctId: 'gpTotalPct', chartId: 'gpTotalChart', label: 'Toplam' },
+];
+
+let gpSeries = [];      // /api/snapshots/pct onbellegi (donem secici yeniden cizer)
+let gpLive = {};        // key -> anlik yuzde (serinin sonuna eklenir)
+let gpRange = 'all';
+
+// Yerel tarih (YYYY-MM-DD) — canli noktanin x ekseni etiketi
+function gpToday() {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+async function genelPctLoad() {
+  const safe = (p) => p.catch(() => ({}));
+  const [b, u, m, c, cy, fn, series] = await Promise.all([
+    safe(api('/api/summary')),
+    safe(api('/api/us/summary')),
+    safe(api('/api/metal/summary')),
+    safe(api('/api/currency/summary')),
+    safe(api('/api/crypto/summary')),
+    safe(api('/api/funds/summary')),
+    api('/api/snapshots/pct').catch(() => []),
+  ]);
+  gpSeries = series || [];
+
+  // Sinif basina: TL degeri + yuzdenin hesaplandigi kar/maliyet cifti.
+  // (ABD ve Kripto yuzdesi USD bazli — Genel sekmesindeki kartlarla ayni.)
+  const bistVal = b.totalCurrentValue != null ? b.totalCurrentValue : null;
+  const usVal = u.totalValueTRY != null ? u.totalValueTRY : null;
+  const metalVal = m.totalValue != null ? m.totalValue : null;
+  const currVal = c.totalValue != null ? c.totalValue : null;
+  const cryptoVal = cy.totalValueTRY != null ? cy.totalValueTRY : null;
+  const fundVal = fn.totalValue != null ? fn.totalValue : null;
+
+  // Toplam: TL bazinda agregasyon (Genel sekmesindeki addAgg ile ayni)
+  let aggProfit = 0, aggCost = 0, aggValue = 0;
+  const addAgg = (v, p, cost) => {
+    if (v > 0 && p != null && cost > 0) { aggProfit += p; aggCost += cost; aggValue += v; }
+  };
+  addAgg(bistVal, b.totalProfit, b.totalCostBasis);
+  addAgg(usVal, u.totalProfitTRY, u.totalCostTRY);
+  addAgg(metalVal, m.totalProfit, m.totalCost);
+  addAgg(currVal, c.totalProfit, c.totalCost);
+  addAgg(cryptoVal, cy.totalProfitTRY, cy.totalCostTRY);
+  addAgg(fundVal, fn.totalProfit, fn.totalCost);
+
+  const cards = {
+    total: { value: aggCost > 0 ? aggValue : null, profit: aggCost > 0 ? aggProfit : null, cost: aggCost },
+    bist: { value: bistVal, profit: b.totalProfit, cost: b.totalCostBasis },
+    us: { value: usVal, profit: u.totalProfitUSD, cost: u.totalCostUSD },
+    metal: { value: metalVal, profit: m.totalProfit, cost: m.totalCost },
+    currency: { value: currVal, profit: c.totalProfit, cost: c.totalCost },
+    crypto: { value: cryptoVal, profit: cy.totalProfitUSD, cost: cy.totalCostUSD },
+    fund: { value: fundVal, profit: fn.totalProfit, cost: fn.totalCost },
+  };
+
+  gpLive = {};
+  GP_DEFS.forEach((d) => {
+    const k = cards[d.key];
+    $(d.valId).textContent = k.value != null ? tl(k.value) : '—';
+    const el = $(d.pctId);
+    if (k.profit == null || !(k.cost > 0)) {
+      el.textContent = '—';
+      el.className = 'pct-big';
+      return;
+    }
+    const pct = (k.profit / k.cost) * 100;
+    gpLive[d.key] = pct;
+    const up = pct >= 0;
+    el.textContent = `${up ? '▲' : '▼'} %${Math.abs(pct).toFixed(2)}`;
+    el.className = 'pct-big ' + (up ? 'pos' : 'neg');
+  });
+
+  gpRenderCharts();
+}
+
+function gpRenderCharts() {
+  const base = filterByRange(gpSeries, gpRange);
+  const today = gpToday();
+  GP_DEFS.forEach((d) => {
+    // Anlik yuzdeyi serinin sonuna ek nokta olarak koy (sparkline'lardaki mantik)
+    const rows = gpLive[d.key] != null ? base.concat([{ date: today, [d.key]: gpLive[d.key] }]) : base;
+    renderPctChart(d.chartId, rows, d.key, d.color, d.label);
+  });
+}
+
+// Tek bir varlik sinifinin K/Z yuzdesi zaman grafigi (buyuk + tooltip'li).
+// Veri olmayan gunler (null) atlanir; 0 cizgisi varsa ayrica gosterilir.
+function renderPctChart(boxId, series, key, color, label) {
+  const box = $(boxId);
+  if (!box) return;
+  const pts = (series || []).filter((s) => s[key] != null).map((s) => ({ date: s.date, v: Number(s[key]) }));
+  if (pts.length < 2) {
+    box.innerHTML = '<div class="chart-empty">Yeterli veri yok — her gün otomatik birikir (en az 2 gün gerekir).</div>';
+    return;
+  }
+  const W = 680, H = 210, pad = { l: 56, r: 14, t: 14, b: 24 };
+  const innerW = W - pad.l - pad.r, innerH = H - pad.t - pad.b;
+  const vals = pts.map((p) => p.v);
+  let min = Math.min(...vals), max = Math.max(...vals);
+  if (min === max) { min -= 1; max += 1; }
+  const gap = (max - min) * 0.08; // ust/alt nefes payi
+  min -= gap; max += gap;
+  const X = (i) => pad.l + (i / (pts.length - 1)) * innerW;
+  const Y = (v) => pad.t + innerH - ((v - min) / (max - min)) * innerH;
+  const dline = pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(p.v).toFixed(1)}`).join(' ');
+  const area = `${dline} L${X(pts.length - 1).toFixed(1)},${(pad.t + innerH).toFixed(1)} L${X(0).toFixed(1)},${(pad.t + innerH).toFixed(1)} Z`;
+  let grid = '';
+  for (let k = 0; k <= 4; k++) {
+    const v = min + ((max - min) * k) / 4;
+    const y = Y(v);
+    grid += `<line class="grid" x1="${pad.l}" y1="${y.toFixed(1)}" x2="${W - pad.r}" y2="${y.toFixed(1)}"/>` +
+      `<text class="ytick" x="${pad.l - 6}" y="${(y + 4).toFixed(1)}">%${v.toFixed(1)}</text>`;
+  }
+  // sifir cizgisi (kar/zarar sinirini gorunur kilar)
+  const zero = min < 0 && max > 0
+    ? `<line class="zeroline" x1="${pad.l}" y1="${Y(0).toFixed(1)}" x2="${W - pad.r}" y2="${Y(0).toFixed(1)}"/>`
+    : '';
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}">
+    ${grid}${zero}
+    <path d="${area}" fill="${color}" fill-opacity="0.12"/>
+    <path d="${dline}" fill="none" stroke="${color}" stroke-width="2"/>
+    <text class="xtick" x="${pad.l}" y="${H - 6}" style="text-anchor:start">${shortDate(pts[0].date)}</text>
+    <text class="xtick" x="${W - pad.r}" y="${H - 6}" style="text-anchor:end">${shortDate(pts[pts.length - 1].date)}</text>
+  </svg>`;
+  attachChartTooltip(box, {
+    series: pts, W, H, pad, X,
+    rows: (p) => [{ label, color, y: Y(p.v), text: `%${p.v.toFixed(2)}` }],
+  });
+}
+
+$('gpRange').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-r]');
+  if (!btn) return;
+  gpRange = btn.dataset.r;
+  $('gpRange').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
+  gpRenderCharts();
+});
+
+// Genel% kartlarina tiklayinca ilgili sekmeye gec.
+// Grafik alani haric: orada fare gezdirilerek deger okunuyor.
+document.querySelectorAll('#genelPctDash .card[data-goto]').forEach((c) =>
+  c.addEventListener('click', (e) => {
+    if (e.target.closest('.pct-chart')) return;
+    switchDash(c.dataset.goto);
+  })
+);
 
 // ---- Nakit Duzenleme (elde tutulan TL/EUR/USD) ----
 async function openCashHoldings() {

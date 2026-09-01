@@ -1786,6 +1786,103 @@ app.get('/api/snapshots', requireAuth, async (req, res) => {
   }
 });
 
+// ---- Genel% : varlik sinifi bazinda K/Z yuzdesi zaman serisi ----
+// Snapshot'lar yalniz DEGER tutar; maliyet o gune kadarki alimlardan turetilir.
+// Boylece "ayin 1'inde para ekleyince grafik sicriyor" sorunu ortadan kalkar:
+// meblag yerine portfoyun toplam getiri yuzdesi izlenir.
+// Yuzdeler Genel sekmesindeki kart yuzdeleriyle ayni bazda hesaplanir
+// (ABD/Kripto USD bazli, digerleri TL; Toplam ise TL bazinda agregasyon).
+function cumWalker(rows) {
+  // rows: [{d, v}] tarihe gore ARTAN. Donen fonksiyon ARTAN tarihlerle cagrilmali.
+  const list = rows.map((r) => ({ date: String(r.d).slice(0, 10), v: Number(r.v) || 0 }));
+  let i = 0, acc = 0;
+  return (date) => {
+    while (i < list.length && list[i].date <= date) acc += list[i++].v;
+    return acc;
+  };
+}
+
+app.get('/api/snapshots/pct', requireAuth, async (req, res) => {
+  const uid = req.session.userId;
+  const byDate = (sql) => db.query(sql, [uid]).then((r) => r.rows);
+  try {
+    const [snaps, bistBuy, bistDiv, bistIn, usUsd, usTry, metalBuy, currBuy, cryptoUsd, fundBuy] = await Promise.all([
+      db.query(
+        `SELECT snap_date, bist, us, metal, currency, crypto, fund, usd_rate
+           FROM portfolio_snapshots WHERE user_id=$1 ORDER BY snap_date ASC`,
+        [uid]
+      ).then((r) => r.rows),
+      byDate(`SELECT trade_date d, SUM(total) v FROM purchases WHERE user_id=$1 GROUP BY trade_date ORDER BY trade_date`),
+      // temettu (hisse bazli) maliyeti dusurur — portfolio.currentPortfolio ile ayni mantik
+      byDate(`SELECT move_date d, SUM(amount) v FROM cash_movements
+               WHERE user_id=$1 AND kind='dividend' AND symbol IS NOT NULL GROUP BY move_date ORDER BY move_date`),
+      byDate(`SELECT move_date d, SUM(amount) v FROM cash_movements WHERE user_id=$1 GROUP BY move_date ORDER BY move_date`),
+      byDate(`SELECT trade_date d, SUM(total) v FROM us_purchases WHERE user_id=$1 GROUP BY trade_date ORDER BY trade_date`),
+      byDate(`SELECT trade_date d, SUM(total * COALESCE(usdtry,0)) v FROM us_purchases WHERE user_id=$1 GROUP BY trade_date ORDER BY trade_date`),
+      byDate(`SELECT trade_date d, SUM(total) v FROM metal_purchases WHERE user_id=$1 GROUP BY trade_date ORDER BY trade_date`),
+      byDate(`SELECT trade_date d, SUM(total) v FROM currency_purchases WHERE user_id=$1 GROUP BY trade_date ORDER BY trade_date`),
+      byDate(`SELECT trade_date d, SUM(total) v FROM crypto_purchases WHERE user_id=$1 GROUP BY trade_date ORDER BY trade_date`),
+      byDate(`SELECT trade_date d, SUM(total) v FROM fund_purchases WHERE user_id=$1 GROUP BY trade_date ORDER BY trade_date`),
+    ]);
+
+    const wBistBuy = cumWalker(bistBuy), wBistDiv = cumWalker(bistDiv), wBistIn = cumWalker(bistIn);
+    const wUsUsd = cumWalker(usUsd), wUsTry = cumWalker(usTry);
+    const wMetal = cumWalker(metalBuy), wCurr = cumWalker(currBuy);
+    const wCrypto = cumWalker(cryptoUsd), wFund = cumWalker(fundBuy);
+
+    // Deger 0 ise "o gun bu sinif kayitli degil" demektir; -%100 gostermemek icin atlanir
+    const pct = (value, cost) => (cost > 0 && value > 0 ? ((value - cost) / cost) * 100 : null);
+
+    const out = snaps.map((s) => {
+      const date = String(s.snap_date).slice(0, 10);
+      const rate = Number(s.usd_rate) > 0 ? Number(s.usd_rate) : null;
+
+      // BIST snapshot'i nakit DAHIL tutar; yuzde icin nakit cikarilir
+      const bistBought = wBistBuy(date);
+      const bistCash = wBistIn(date) - bistBought;
+      const bistVal = Number(s.bist) - bistCash;
+      const bistCost = bistBought - wBistDiv(date);
+
+      const usCostUsd = wUsUsd(date), usCostTry = wUsTry(date);
+      const usVal = Number(s.us);
+      const usValUsd = rate ? usVal / rate : 0;
+
+      const metalVal = Number(s.metal), metalCost = wMetal(date);
+      const currVal = Number(s.currency), currCost = wCurr(date);
+      const cryptoVal = Number(s.crypto), cryptoCostUsd = wCrypto(date);
+      const cryptoValUsd = rate ? cryptoVal / rate : 0;
+      const cryptoCostTry = rate ? cryptoCostUsd * rate : 0;
+      const fundVal = Number(s.fund), fundCost = wFund(date);
+
+      // Toplam: TL bazinda agregasyon (Genel sekmesindeki addAgg ile ayni)
+      let aggProfit = 0, aggCost = 0, aggValue = 0;
+      const addAgg = (v, c) => { if (v > 0 && c > 0) { aggProfit += v - c; aggCost += c; aggValue += v; } };
+      addAgg(bistVal, bistCost);
+      addAgg(usVal, usCostTry);
+      addAgg(metalVal, metalCost);
+      addAgg(currVal, currCost);
+      addAgg(cryptoVal, cryptoCostTry);
+      addAgg(fundVal, fundCost);
+
+      return {
+        date,
+        bist: pct(bistVal, bistCost),
+        us: pct(usValUsd, usCostUsd),
+        metal: pct(metalVal, metalCost),
+        currency: pct(currVal, currCost),
+        crypto: pct(cryptoValUsd, cryptoCostUsd),
+        fund: pct(fundVal, fundCost),
+        total: aggCost > 0 ? (aggProfit / aggCost) * 100 : null,
+        totalValue: aggCost > 0 ? aggValue : null,
+      };
+    });
+    res.json(out);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Alinamadi' });
+  }
+});
+
 // ===================== CSV DISA AKTARMA =====================
 // UTF-8 BOM + ';' ayirici + ondalik NOKTA + GG.AA.YYYY tarih.
 // (Kullanicinin Excel'i: ondalik nokta, kolon ayirici ';'.)

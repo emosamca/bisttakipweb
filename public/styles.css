@@ -121,6 +121,17 @@ input:focus, select:focus { border-color: var(--primary); }
 .card-spark svg { width: 100%; height: 36px; display: block; overflow: visible; }
 .card-spark .spark-empty { color: var(--muted); font-size: 11px; line-height: 36px; }
 
+/* ---- Genel% sekmesi (buyuk kartlar + yuzde grafikleri) ---- */
+.cards.cards-lg { grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 20px; }
+.pct-bar { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
+.pct-info { flex: 1; min-width: 260px; margin: 0; }
+.pct-card { padding: 20px 22px; }
+.pct-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.pct-card .card-value { font-size: 22px; }
+.pct-big { font-size: 26px; font-weight: 700; white-space: nowrap; color: var(--muted); }
+.pct-chart { margin-top: 14px; }
+.pct-chart .zeroline { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: .7; }
+
 /* ---- Basarimlar ---- */
 .achv-banner { background: linear-gradient(135deg, rgba(255,215,0,0.18), rgba(255,215,0,0.04)); border: 1px solid #ffd700; color: #ffe680; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; }
 .achv-level { display: flex; align-items: center; gap: 16px; }

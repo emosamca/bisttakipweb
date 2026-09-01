@@ -75,6 +75,7 @@
     <main class="content">
       <div class="dash-tabs">
         <button class="tab active" id="tabGenel">🌐 Genel</button>
+        <button class="tab" id="tabGenelPct">📉 Genel%</button>
         <button class="tab" id="tabBist">📊 BIST Dashboard</button>
         <button class="tab" id="tabFund">📈 BIST Fon</button>
         <button class="tab" id="tabUs">🇺🇸 ABD Dashboard</button>
@@ -183,6 +184,92 @@
         <div id="genPortfolioChart" class="value-chart"><div class="chart-empty">Yükleniyor…</div></div>
       </section>
       </div><!-- /genelDash -->
+
+      <div id="genelPctDash" class="hidden">
+      <div class="pct-bar">
+        <div class="info-box pct-info">Grafikler <strong>meblağ değil yüzde</strong> gösterir: her gün için portföyün toplam getirisi (K/Z %). Para eklemeleri yüzdeyi bozmadığı için gerçek gidişat görünür.</div>
+        <div class="range-btns" id="gpRange">
+          <button type="button" data-r="1m">1A</button>
+          <button type="button" data-r="3m">3A</button>
+          <button type="button" data-r="6m">6A</button>
+          <button type="button" data-r="1y">1Y</button>
+          <button type="button" class="active" data-r="all">Tümü</button>
+        </div>
+      </div>
+
+      <section class="cards cards-lg">
+        <div class="card pct-card clickable" data-goto="bist" title="BIST Dashboard'a git">
+          <div class="pct-head">
+            <div>
+              <div class="card-label">BIST Hisse Değeri (Nakit Hariç)</div>
+              <div class="card-value" id="gpBistVal">—</div>
+            </div>
+            <div class="pct-big" id="gpBistPct">—</div>
+          </div>
+          <div class="pct-chart value-chart" id="gpBistChart"><div class="chart-empty">Yükleniyor…</div></div>
+        </div>
+        <div class="card pct-card clickable" data-goto="us" title="ABD Dashboard'a git">
+          <div class="pct-head">
+            <div>
+              <div class="card-label">ABD Güncel Değer (TL) · % USD bazlı</div>
+              <div class="card-value" id="gpUsVal">—</div>
+            </div>
+            <div class="pct-big" id="gpUsPct">—</div>
+          </div>
+          <div class="pct-chart value-chart" id="gpUsChart"><div class="chart-empty">Yükleniyor…</div></div>
+        </div>
+        <div class="card pct-card clickable" data-goto="metal" title="Kıymetli Maden'e git">
+          <div class="pct-head">
+            <div>
+              <div class="card-label">Kıymetli Maden Değeri (TL)</div>
+              <div class="card-value" id="gpMetalVal">—</div>
+            </div>
+            <div class="pct-big" id="gpMetalPct">—</div>
+          </div>
+          <div class="pct-chart value-chart" id="gpMetalChart"><div class="chart-empty">Yükleniyor…</div></div>
+        </div>
+        <div class="card pct-card clickable" data-goto="currency" title="Döviz'e git">
+          <div class="pct-head">
+            <div>
+              <div class="card-label">Döviz Değeri (TL)</div>
+              <div class="card-value" id="gpCurrencyVal">—</div>
+            </div>
+            <div class="pct-big" id="gpCurrencyPct">—</div>
+          </div>
+          <div class="pct-chart value-chart" id="gpCurrencyChart"><div class="chart-empty">Yükleniyor…</div></div>
+        </div>
+        <div class="card pct-card clickable" data-goto="crypto" title="Kripto'ya git">
+          <div class="pct-head">
+            <div>
+              <div class="card-label">Kripto Değeri (TL) · % USD bazlı</div>
+              <div class="card-value" id="gpCryptoVal">—</div>
+            </div>
+            <div class="pct-big" id="gpCryptoPct">—</div>
+          </div>
+          <div class="pct-chart value-chart" id="gpCryptoChart"><div class="chart-empty">Yükleniyor…</div></div>
+        </div>
+        <div class="card pct-card clickable" data-goto="funds" title="Fon'a git">
+          <div class="pct-head">
+            <div>
+              <div class="card-label">Fon Değeri (TL)</div>
+              <div class="card-value" id="gpFundVal">—</div>
+            </div>
+            <div class="pct-big" id="gpFundPct">—</div>
+          </div>
+          <div class="pct-chart value-chart" id="gpFundChart"><div class="chart-empty">Yükleniyor…</div></div>
+        </div>
+        <div class="card pct-card highlight">
+          <div class="pct-head">
+            <div>
+              <div class="card-label">Toplam Portföy (Nakit/Binance Hariç)</div>
+              <div class="card-value" id="gpTotalVal">—</div>
+            </div>
+            <div class="pct-big" id="gpTotalPct">—</div>
+          </div>
+          <div class="pct-chart value-chart" id="gpTotalChart"><div class="chart-empty">Yükleniyor…</div></div>
+        </div>
+      </section>
+      </div><!-- /genelPctDash -->
 
       <div id="bistDash" class="hidden">
       <section class="cards">
