@@ -2325,6 +2325,7 @@ async function announceFundPrices() {
         await setAppState(f.key, today);
         toStore.set(f.p.code, Number(f.p.price));
       }
+      console.log(`Fon fiyat bildirimi gonderildi (user ${row.user_id}): ${fresh.map((f) => f.p.code).join(', ')}`);
     } catch (e) {
       console.error('Fon fiyat bildirimi hatasi (user ' + row.user_id + '):', e.message);
     }
@@ -2670,6 +2671,12 @@ async function ensureDefaultUser() {
     setTimeout(() => {
       announceFundPrices().catch((e) => console.error('Fon fiyat bildirimi hatasi:', e.message));
     }, 15000);
+    // Kacirilan bildirimleri gun icinde telafi et: LISTEN baglantisi koparsa
+    // (yeniden baglanana kadar gelen bildirim kaybolur) veya sunucu fiyat
+    // yazilirken kapaliysa mesaj yine de gitsin. Gunluk bayrak tekrari onler.
+    setInterval(() => {
+      announceFundPrices().catch((e) => console.error('Fon fiyat bildirimi hatasi:', e.message));
+    }, 5 * 60 * 1000);
     // Binance toplamlarini 5 dakikada bir yenile (sunucu tarafi; secret burada kalir)
     setTimeout(refreshAllBinance, 10000); // baslangictan 10 sn sonra ilk cekim
     setInterval(refreshAllBinance, 5 * 60 * 1000);
