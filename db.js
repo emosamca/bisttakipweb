@@ -236,6 +236,16 @@ CREATE TABLE IF NOT EXISTS fund_prices (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Uygulamanin kendi tuttugu SON GECERLI fon fiyati. fund_prices.price 0 gelince
+-- (servis o gun fiyati henuz cekememis) gosterilecek deger buradan alinir.
+-- Servisin price_old kolonu nullable ve bazen 0/NULL geldiginden ona tek basina
+-- guvenilmiyor; burasi yalnizca 0'dan buyuk fiyatlarla dolar.
+CREATE TABLE IF NOT EXISTS fund_price_last_good (
+  code     TEXT PRIMARY KEY,                                -- fon kodu
+  price    NUMERIC(18,6) NOT NULL CHECK (price > 0),        -- gorulen son gecerli fiyat (TL)
+  seen_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- TEFAS fon alimlari (kullaniciya ozel). Komisyon yok; TL bazli.
 CREATE TABLE IF NOT EXISTS fund_purchases (
   id          SERIAL PRIMARY KEY,

@@ -2336,6 +2336,13 @@ async function announceFundPrices() {
   }
 }
 
+// Gecerli fon fiyatlarini onbellege al (fiyat 0'a dustugunde gosterilecek deger).
+function rememberFundPrices() {
+  fundsportfolio
+    .rememberGoodPrices()
+    .catch((e) => console.error('Fon fiyat onbellegi hatasi:', e.message));
+}
+
 // Servis fiyatlari toplu yazabildiginden bildirimi kisa sure biriktirip
 // tek mesajda gonder (her fon icin ayri mesaj atilmasin).
 let fundAnnounceTimer = null;
@@ -2665,8 +2672,12 @@ async function ensureDefaultUser() {
     // TEFAS fon fiyati degisince fon panosunu guncelle + Telegram bildirimi
     await db.listen('fund_price_change', () => {
       broadcast('fund_price_change', { at: Date.now() });
+      rememberFundPrices();
       scheduleFundPriceAnnounce();
     });
+    // Gecerli fiyatlari uygulamanin kendi onbellegine al: servis ertesi gun
+    // price'i 0'a cekince (ve price_old'u bosaltinca) fiyat "—" gorunmesin.
+    rememberFundPrices();
     // Sunucu fiyat yazildigi sirada kapaliysa acilista bir kez telafi et
     setTimeout(() => {
       announceFundPrices().catch((e) => console.error('Fon fiyat bildirimi hatasi:', e.message));
@@ -2675,6 +2686,7 @@ async function ensureDefaultUser() {
     // (yeniden baglanana kadar gelen bildirim kaybolur) veya sunucu fiyat
     // yazilirken kapaliysa mesaj yine de gitsin. Gunluk bayrak tekrari onler.
     setInterval(() => {
+      rememberFundPrices();
       announceFundPrices().catch((e) => console.error('Fon fiyat bildirimi hatasi:', e.message));
     }, 5 * 60 * 1000);
     // Binance toplamlarini 5 dakikada bir yenile (sunucu tarafi; secret burada kalir)

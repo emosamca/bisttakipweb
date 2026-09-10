@@ -6,17 +6,43 @@ function normCode(code) {
   return String(code || '').trim().toUpperCase();
 }
 
-// price 0 gelmisse (servis henuz guncelleyememis) price_old'a dus
+// Fiyat okumasi: fund_prices'a uygulamanin kendi son-gecerli-fiyat onbellegi eklenir.
+// price_old servisin kolonu; nullable ve bazen 0/NULL geldigi icin tek basina
+// yeterli degil -> son care olarak fund_price_last_good kullanilir.
+const PRICE_SELECT = `
+  SELECT fp.code, fp.title, fp.price,
+         COALESCE(fp.price_old, 0) AS price_old,
+         COALESCE(lg.price, 0)     AS last_good,
+         fp.updated_at
+    FROM fund_prices fp
+    LEFT JOIN fund_price_last_good lg ON lg.code = fp.code`;
+
+// Guncel fiyat 0 ise sirasiyla servisin price_old'una, o da yoksa uygulamanin
+// kendi tuttugu son gecerli fiyata dusulur. Fiyat guncel degilse isOld=true
+// (arayuzde yanina "!" konur).
 function effectivePrice(row) {
   const price = Number(row.price);
+  if (price > 0) return { price, isOld: false };
   const priceOld = Number(row.price_old);
-  const isOld = price <= 0 && priceOld > 0;
-  return { price: isOld ? priceOld : price, isOld };
+  if (priceOld > 0) return { price: priceOld, isOld: true };
+  const lastGood = Number(row.last_good);
+  if (lastGood > 0) return { price: lastGood, isOld: true };
+  return { price: 0, isOld: false }; // hic fiyat gorulmemis
+}
+
+// Gecerli fiyatlari uygulamanin kendi onbellegine yaz. Servis price_old'u
+// sifirlasa/bosaltsa bile fiyat 0 iken gosterilecek bir deger kalir.
+async function rememberGoodPrices() {
+  await db.query(
+    `INSERT INTO fund_price_last_good (code, price, seen_at)
+     SELECT code, price, now() FROM fund_prices WHERE price > 0
+     ON CONFLICT (code) DO UPDATE SET price = EXCLUDED.price, seen_at = now()`
+  );
 }
 
 // code -> { price, title, isOld }
 async function priceMap() {
-  const r = await db.query('SELECT code, price, price_old, title FROM fund_prices');
+  const r = await db.query(PRICE_SELECT);
   const m = {};
   r.rows.forEach((x) => {
     const { price, isOld } = effectivePrice(x);
@@ -80,11 +106,11 @@ async function summary(userId) {
 }
 
 async function pricesList() {
-  const r = await db.query('SELECT code, title, price, price_old, updated_at FROM fund_prices ORDER BY code');
+  const r = await db.query(`${PRICE_SELECT} ORDER BY fp.code`);
   return r.rows.map((x) => {
     const { price, isOld } = effectivePrice(x);
     return { code: x.code, title: x.title || '', price, priceIsOld: isOld, updated_at: x.updated_at };
   });
 }
 
-module.exports = { normCode, priceMap, holdingsBeforeDate, holdings, summary, pricesList };
+module.exports = { normCode, priceMap, rememberGoodPrices, holdingsBeforeDate, holdings, summary, pricesList };
