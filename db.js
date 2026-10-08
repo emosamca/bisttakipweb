@@ -215,14 +215,19 @@ CREATE TABLE IF NOT EXISTS currency_prices (
 -- ===================== KRIPTO tablolari =====================
 -- Alim USD (USDT) bazli. symbol = coin (orn 'ADA'); Binance ciftleri symbol||'USDT'.
 -- Kripto adetleri/fiyatlari cok ondalikli olabilir -> NUMERIC(28,10).
+-- Cekim satirlari NEGATIF quantity/total ile tutulur (kind='withdraw');
+-- bu sayede SUM(quantity)/SUM(total) tabanli ortalama maliyet hesabi
+-- hicbir ek kod degisikligi gerektirmeden dogru sonucu verir (doviz/maden
+-- cekimiyle ayni mantik). Bu, manuel Kripto panelidir; Binance paneli ayri.
 CREATE TABLE IF NOT EXISTS crypto_purchases (
   id          SERIAL PRIMARY KEY,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   trade_date  DATE NOT NULL,
   symbol      TEXT NOT NULL,                                  -- coin (orn 'ADA')
-  quantity    NUMERIC(28,10) NOT NULL CHECK (quantity > 0),   -- coin adedi
-  price       NUMERIC(28,10) NOT NULL CHECK (price >= 0),     -- USD / coin
-  total       NUMERIC(28,10) NOT NULL,                        -- USD (adet * fiyat)
+  quantity    NUMERIC(28,10) NOT NULL CHECK (quantity <> 0),  -- coin adedi; cekimde negatif
+  price       NUMERIC(28,10) NOT NULL CHECK (price >= 0),     -- USD / coin (alis / cekimdeki ort. maliyet)
+  total       NUMERIC(28,10) NOT NULL,                        -- USD (adet * fiyat); cekimde negatif
+  kind        TEXT NOT NULL DEFAULT 'buy',                    -- 'buy' | 'withdraw'
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_crypto_purchases_user ON crypto_purchases(user_id, symbol);
@@ -386,6 +391,11 @@ ALTER TABLE currency_purchases ADD CONSTRAINT currency_purchases_quantity_check 
 ALTER TABLE metal_purchases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'buy';
 ALTER TABLE metal_purchases DROP CONSTRAINT IF EXISTS metal_purchases_quantity_check;
 ALTER TABLE metal_purchases ADD CONSTRAINT metal_purchases_quantity_check CHECK (quantity <> 0);
+
+-- Kripto cekimi: kayit turu + negatif adede izin ver (eski kisit quantity > 0 idi)
+ALTER TABLE crypto_purchases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'buy';
+ALTER TABLE crypto_purchases DROP CONSTRAINT IF EXISTS crypto_purchases_quantity_check;
+ALTER TABLE crypto_purchases ADD CONSTRAINT crypto_purchases_quantity_check CHECK (quantity <> 0);
 
 -- Gecmisi olmayan kullanicilar icin mevcut parolayi gecmise tohumla
 INSERT INTO password_history (user_id, password)

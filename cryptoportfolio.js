@@ -19,6 +19,27 @@ async function priceMap() {
   return m;
 }
 
+// Bir coin'in SU ANKI toplam adedi+maliyeti (butun alim+cekim satirlari dahil).
+// excludeId verilirse o satir disarida tutulur (cekim DUZENLEME'de "bu cekim hic
+// olmasaydi ortalama maliyet ne olurdu" sorusunun cevabi icin kullanilir).
+async function currentTotals(userId, symbol, excludeId) {
+  const s = normSymbol(symbol);
+  const r = excludeId
+    ? await db.query(
+        `SELECT COALESCE(SUM(quantity),0) qty, COALESCE(SUM(total),0) cost
+           FROM crypto_purchases WHERE user_id=$1 AND symbol=$2 AND id<>$3`,
+        [userId, s, excludeId]
+      )
+    : await db.query(
+        `SELECT COALESCE(SUM(quantity),0) qty, COALESCE(SUM(total),0) cost
+           FROM crypto_purchases WHERE user_id=$1 AND symbol=$2`,
+        [userId, s]
+      );
+  const qty = Number(r.rows[0].qty);
+  const cost = Number(r.rows[0].cost);
+  return { qty, cost, avgCost: qty > 0 ? cost / qty : 0 };
+}
+
 // Bir tarihten ONCE (haric) o coin'in adedi ve ortalama maliyeti (USD)
 async function holdingsBeforeDate(userId, symbol, date) {
   const s = normSymbol(symbol);
@@ -100,4 +121,4 @@ async function pricesList() {
   });
 }
 
-module.exports = { normSymbol, currentRate, priceMap, holdingsBeforeDate, holdings, summary, pricesList };
+module.exports = { normSymbol, currentRate, priceMap, currentTotals, holdingsBeforeDate, holdings, summary, pricesList };

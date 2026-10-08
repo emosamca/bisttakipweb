@@ -3129,8 +3129,13 @@ async function cryptoRefreshAll() {
   await Promise.all([cryptoLoadSummary(), cryptoLoadPrices(), cryptoLoadPurchases()]);
 }
 
+// Coin bazinda { quantity, avgCost } — Çekim modalinde bakiye onizlemesi icin
+let cryptoHoldingsByCode = {};
+
 async function cryptoLoadSummary() {
   const s = await api('/api/crypto/summary');
+  cryptoHoldingsByCode = {};
+  s.holdings.forEach((h) => (cryptoHoldingsByCode[h.symbol] = { quantity: h.quantity, avgCost: h.avgCostUSD }));
   $('cyCardRate').textContent = s.rate != null ? tl(s.rate) : '—';
   $('cyCardCostUsd').textContent = usd(s.totalCostUSD);
   $('cyCardValueUsd').textContent = s.totalValueUSD != null ? usd(s.totalValueUSD) : '—';
@@ -3216,22 +3221,28 @@ function cryptoRenderPurchases() {
   if (cryptoPurchasePage > pages) cryptoPurchasePage = pages;
   const pageRows = rows.slice((cryptoPurchasePage - 1) * PAGE_SIZE, cryptoPurchasePage * PAGE_SIZE);
   tb.innerHTML = pageRows
-    .map(
-      (r) => `<tr>
+    .map((r) => {
+      const isW = r.kind === 'withdraw';
+      return `<tr>
         <td>${r.trade_date.slice(0, 10)}</td>
+        <td><span class="tag ${isW ? 'withdraw' : 'buy'}">${isW ? 'Çekim' : 'Alım'}</span></td>
         <td><strong>${esc(r.symbol)}</strong></td>
-        <td class="num">${num(r.quantity)}</td>
+        <td class="num${isW ? ' neg' : ''}">${isW ? '−' : ''}${num(Math.abs(r.quantity))}</td>
         <td class="num">${usd8(r.price)}</td>
-        <td class="num">${usd(r.total)}</td>
+        <td class="num${isW ? ' neg' : ''}">${isW ? '−' : ''}${usd(Math.abs(r.total))}</td>
         <td><div class="row-actions">
           <button class="edit-btn" data-edit-cy="${r.id}" title="Düzenle">✏️</button>
           <button class="del-btn" data-del-cy="${r.id}" title="Sil">🗑</button>
         </div></td>
-      </tr>`
-    )
+      </tr>`;
+    })
     .join('');
   tb.querySelectorAll('[data-edit-cy]').forEach((b) =>
-    b.addEventListener('click', () => cryptoOpenPurchaseModal(cryptoPurchaseCache.find((x) => x.id == b.dataset.editCy)))
+    b.addEventListener('click', () => {
+      const row = cryptoPurchaseCache.find((x) => x.id == b.dataset.editCy);
+      if (row.kind === 'withdraw') cryptoOpenWithdrawModal(row);
+      else cryptoOpenPurchaseModal(row);
+    })
   );
   tb.querySelectorAll('[data-del-cy]').forEach((b) =>
     b.addEventListener('click', () => cryptoDelPurchase(b.dataset.delCy))
@@ -3339,6 +3350,78 @@ $('cryptoPurchaseForm').addEventListener('submit', async (e) => {
   } finally {
     submitBtn.disabled = false;
     submitBtn.textContent = oldLabel;
+  }
+});
+
+// ---- Kripto çekim modalı ----
+// Çekim miktarı güncel ortalama maliyetle USD'ye çevrilip o oranda maliyetten
+// düşülür (sunucu tarafında); burada yalnızca mevcut bakiye önizlemesi yapılır.
+// Coin secimi, zaten sahip olunan coin'lerle sinirli (serbest metin degil).
+function cryptoPopulateWithdrawSymbols(selected) {
+  const sel = $('cyWSymbol');
+  const symbols = Object.keys(cryptoHoldingsByCode).filter((s) => cryptoHoldingsByCode[s].quantity > 0);
+  sel.innerHTML = symbols.length
+    ? symbols.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('')
+    : '<option value="">(coin yok)</option>';
+  if (selected && symbols.includes(selected)) sel.value = selected;
+}
+
+function cryptoUpdateWithdrawInfo() {
+  const sym = $('cyWSymbol').value;
+  const box = $('cyWBalanceInfo');
+  const h = cryptoHoldingsByCode[sym];
+  const editId = $('cyWId').value;
+  // Duzenlenen cekim, kendi tuttugu miktari bakiyeye geri eklemis gibi gosterilir
+  const editOldQty = editId ? Number((cryptoPurchaseCache.find((x) => x.id == editId) || {}).quantity || 0) : 0;
+  const available = (h ? h.quantity : 0) - editOldQty; // editOldQty negatif, cikarma geri ekler
+  if (!h || available <= 0) {
+    box.classList.remove('has-data');
+    box.innerHTML = sym ? `<strong>${esc(sym)}</strong> — çekilebilir bakiye yok.` : 'Çekilebilecek coin yok.';
+    return;
+  }
+  box.classList.add('has-data');
+  box.innerHTML = `<strong>${esc(sym)}</strong> — mevcut bakiye: <strong>${num(available)}</strong>, ort. maliyet <strong>${usd8(h.avgCost)}</strong>`;
+}
+
+function cryptoOpenWithdrawModal(row) {
+  $('cryptoWithdrawForm').reset();
+  $('cyWError').classList.add('hidden');
+  if (row) {
+    $('cryptoWithdrawTitle').textContent = 'Kripto Çekim Düzenle';
+    $('cyWId').value = row.id;
+    $('cyWDate').value = row.trade_date.slice(0, 10);
+    cryptoPopulateWithdrawSymbols(row.symbol);
+    $('cyWQty').value = Math.abs(row.quantity);
+  } else {
+    $('cryptoWithdrawTitle').textContent = 'Kripto Çekim Ekle';
+    $('cyWId').value = '';
+    $('cyWDate').value = todayStr();
+    cryptoPopulateWithdrawSymbols();
+  }
+  cryptoUpdateWithdrawInfo();
+  openModal('cryptoWithdrawModal');
+  focusDate('cyWDate');
+}
+$('cryptoOpenWithdraw').addEventListener('click', () => cryptoOpenWithdrawModal(null));
+$('cyWSymbol').addEventListener('change', cryptoUpdateWithdrawInfo);
+
+$('cryptoWithdrawForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('cyWError');
+  err.classList.add('hidden');
+  const id = $('cyWId').value;
+  const body = JSON.stringify({
+    trade_date: $('cyWDate').value,
+    symbol: $('cyWSymbol').value,
+    quantity: $('cyWQty').value,
+  });
+  try {
+    await api(id ? `/api/crypto/withdrawals/${id}` : '/api/crypto/withdrawals', { method: id ? 'PUT' : 'POST', body });
+    closeModal('cryptoWithdrawModal');
+    cryptoRefreshAll();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
   }
 });
 

@@ -1449,8 +1449,8 @@ app.post('/api/crypto/purchases', requireAuth, async (req, res) => {
   }
   try {
     const r = await db.query(
-      `INSERT INTO crypto_purchases (user_id, trade_date, symbol, quantity, price, total)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      `INSERT INTO crypto_purchases (user_id, trade_date, symbol, quantity, price, total, kind)
+       VALUES ($1,$2,$3,$4,$5,$6,'buy') RETURNING *`,
       [req.session.userId, p.trade_date, p.symbol, p.qty, p.prc, p.total]
     );
     // coin'i fiyat tablosuna ekle + anlik fiyati hemen yaz (servis sonra gunceller)
@@ -1466,6 +1466,7 @@ app.post('/api/crypto/purchases', requireAuth, async (req, res) => {
   }
 });
 
+// kind='buy' sarti: cekim satirini yanlislikla alim gibi guncellemesin
 app.put('/api/crypto/purchases/:id', requireAuth, async (req, res) => {
   const p = readCryptoPurchase(req.body);
   if (!p) return res.status(400).json({ error: 'Tarih, coin, adet ve fiyat gerekli' });
@@ -1477,7 +1478,7 @@ app.put('/api/crypto/purchases/:id', requireAuth, async (req, res) => {
   try {
     const r = await db.query(
       `UPDATE crypto_purchases SET trade_date=$1, symbol=$2, quantity=$3, price=$4, total=$5
-        WHERE id=$6 AND user_id=$7 RETURNING *`,
+        WHERE id=$6 AND user_id=$7 AND kind='buy' RETURNING *`,
       [p.trade_date, p.symbol, p.qty, p.prc, p.total, req.params.id, req.session.userId]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Kayit bulunamadi' });
@@ -1494,6 +1495,7 @@ app.put('/api/crypto/purchases/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Alim + cekim ortak tablo oldugundan silme her iki turde de aynidir
 app.delete('/api/crypto/purchases/:id', requireAuth, async (req, res) => {
   try {
     await db.query('DELETE FROM crypto_purchases WHERE id=$1 AND user_id=$2', [req.params.id, req.session.userId]);
@@ -1502,6 +1504,71 @@ app.delete('/api/crypto/purchases/:id', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Silinemedi' });
+  }
+});
+
+// ---- Kripto CEKIMI: toplam coin adedinden duser, ortalama maliyeti DEGISTIRMEZ ----
+// Cekilen adet, cekim anindaki ortalama maliyetle USD'ye cevrilip ayni oranda
+// maliyetten de dusulur (negatif quantity/total); SUM bazli ortalama maliyet
+// formulu bu sayede degismeden kalir (doviz/maden cekimiyle ayni mantik).
+// Binance dogrulamasi gerekmez: coin zaten takip ediliyor olmali (mevcut pozisyon).
+function readCryptoWithdrawal(body) {
+  const { trade_date, symbol } = body || {};
+  const quantity = Number((body || {}).quantity);
+  if (!trade_date || !symbol || !(quantity > 0)) return null;
+  const sym = cryptoportfolio.normSymbol(symbol);
+  if (!sym) return { error: 'Coin adi gerekli' };
+  return { trade_date, symbol: sym, qty: quantity };
+}
+
+app.post('/api/crypto/withdrawals', requireAuth, async (req, res) => {
+  const w = readCryptoWithdrawal(req.body);
+  if (!w) return res.status(400).json({ error: 'Tarih, coin ve adet gerekli' });
+  if (w.error) return res.status(400).json({ error: w.error });
+  try {
+    const { qty: available, avgCost } = await cryptoportfolio.currentTotals(req.session.userId, w.symbol);
+    if (w.qty > available + 1e-8) {
+      return res.status(400).json({ error: `Yetersiz bakiye: elinizde ${available} ${w.symbol} var` });
+    }
+    const total = -Math.round(w.qty * avgCost * 1e8) / 1e8;
+    const r = await db.query(
+      `INSERT INTO crypto_purchases (user_id, trade_date, symbol, quantity, price, total, kind)
+       VALUES ($1,$2,$3,$4,$5,$6,'withdraw') RETURNING *`,
+      [req.session.userId, w.trade_date, w.symbol, -w.qty, avgCost, total]
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Cekim kaydedilemedi' });
+  }
+});
+
+app.put('/api/crypto/withdrawals/:id', requireAuth, async (req, res) => {
+  const w = readCryptoWithdrawal(req.body);
+  if (!w) return res.status(400).json({ error: 'Tarih, coin ve adet gerekli' });
+  if (w.error) return res.status(400).json({ error: w.error });
+  try {
+    const id = Number(req.params.id);
+    const existing = await db.query(
+      `SELECT id FROM crypto_purchases WHERE id=$1 AND user_id=$2 AND kind='withdraw'`,
+      [id, req.session.userId]
+    );
+    if (!existing.rows.length) return res.status(404).json({ error: 'Kayit bulunamadi' });
+    // Bu cekim hic olmasaydi mevcut bakiye/ortalama maliyet ne olurdu?
+    const { qty: available, avgCost } = await cryptoportfolio.currentTotals(req.session.userId, w.symbol, id);
+    if (w.qty > available + 1e-8) {
+      return res.status(400).json({ error: `Yetersiz bakiye: elinizde ${available} ${w.symbol} var` });
+    }
+    const total = -Math.round(w.qty * avgCost * 1e8) / 1e8;
+    const r = await db.query(
+      `UPDATE crypto_purchases SET trade_date=$1, symbol=$2, quantity=$3, price=$4, total=$5
+        WHERE id=$6 AND user_id=$7 AND kind='withdraw' RETURNING *`,
+      [w.trade_date, w.symbol, -w.qty, avgCost, total, id, req.session.userId]
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Guncellenemedi' });
   }
 });
 

@@ -57,6 +57,7 @@
       </div>
       <div id="cryptoMenu" class="hidden">
         <button class="btn primary block" id="cryptoOpenPurchase">+ Kripto Alım Ekle</button>
+        <button class="btn block" id="cryptoOpenWithdraw">− Kripto Çekim Ekle</button>
       </div>
       <div id="fundsMenu" class="hidden">
         <button class="btn primary block" id="fundsOpenPurchase">+ Fon Alım Ekle</button>
@@ -790,15 +791,15 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h3>Kripto Alım Geçmişi</h3>
+            <h3>Kripto Alım / Çekim Geçmişi</h3>
             <a class="btn ghost small" href="/api/export/crypto.csv" download title="Excel/CSV olarak indir">⬇ CSV</a>
           </div>
           <div class="table-wrap">
             <table id="cryptoPurchasesTable">
               <thead>
                 <tr>
-                  <th>Tarih</th><th>Coin</th><th class="num">Adet</th>
-                  <th class="num">Alış ($)</th><th class="num">Toplam ($)</th><th></th>
+                  <th>Tarih</th><th>Tür</th><th>Coin</th><th class="num">Adet</th>
+                  <th class="num">Fiyat ($)</th><th class="num">Toplam ($)</th><th></th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -1589,6 +1590,35 @@
         <button type="submit" class="btn primary">Kaydet</button>
       </div>
       <div class="error hidden" id="cyPError"></div>
+    </form>
+  </div>
+
+  <!-- KRIPTO CEKIMI EKLE / DUZENLE MODAL -->
+  <div id="cryptoWithdrawModal" class="modal hidden">
+    <form class="modal-card" id="cryptoWithdrawForm">
+      <input type="hidden" id="cyWId" />
+      <div class="modal-head">
+        <h3 id="cryptoWithdrawTitle">Kripto Çekim Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="cyWDate" lang="tr" required />
+        </label>
+        <label>Coin
+          <select id="cyWSymbol"></select>
+        </label>
+        <label>Çekim Miktarı
+          <input type="number" id="cyWQty" step="any" min="0" required />
+        </label>
+      </div>
+      <div class="info-box" id="cyWBalanceInfo">Coin seçin; mevcut bakiye burada gösterilir.</div>
+      <div class="info-box">Çekim, güncel ortalama maliyetle USD'ye çevrilip toplam maliyetten de düşülür; bu yüzden <strong>ortalama maliyet değişmez</strong>.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="cyWError"></div>
     </form>
   </div>
 
