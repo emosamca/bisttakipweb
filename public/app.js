@@ -2562,8 +2562,13 @@ async function metalRefreshAll() {
   await Promise.all([metalLoadSummary(), metalLoadPrices(), metalLoadPurchases()]);
 }
 
+// Maden bazinda { quantity, avgCost } — Çekim modalinda bakiye onizlemesi icin
+let metalHoldingsByCode = {};
+
 async function metalLoadSummary() {
   const s = await api('/api/metal/summary');
+  metalHoldingsByCode = {};
+  s.holdings.forEach((h) => (metalHoldingsByCode[h.metal] = { quantity: h.quantity, avgCost: h.avgCost }));
   $('mCardCost').textContent = tl(s.totalCost);
   $('mCardValue').textContent = s.totalValue != null ? tl(s.totalValue) : '—';
   if (s.totalProfit != null) {
@@ -2637,22 +2642,28 @@ function metalRenderPurchases() {
   if (metalPurchasePage > pages) metalPurchasePage = pages;
   const pageRows = rows.slice((metalPurchasePage - 1) * PAGE_SIZE, metalPurchasePage * PAGE_SIZE);
   tb.innerHTML = pageRows
-    .map(
-      (r) => `<tr>
+    .map((r) => {
+      const isW = r.kind === 'withdraw';
+      return `<tr>
         <td>${r.trade_date.slice(0, 10)}</td>
+        <td><span class="tag ${isW ? 'withdraw' : 'buy'}">${isW ? 'Çekim' : 'Alım'}</span></td>
         <td><strong>${esc(METAL_LABELS[r.metal] || r.metal)}</strong></td>
-        <td class="num">${num(r.quantity)}</td>
+        <td class="num${isW ? ' neg' : ''}">${isW ? '−' : ''}${num(Math.abs(r.quantity))}</td>
         <td class="num">${tl(r.price)}</td>
-        <td class="num">${tl(r.total)}</td>
+        <td class="num${isW ? ' neg' : ''}">${isW ? '−' : ''}${tl(Math.abs(r.total))}</td>
         <td><div class="row-actions">
           <button class="edit-btn" data-edit-mp="${r.id}" title="Düzenle">✏️</button>
           <button class="del-btn" data-del-mp="${r.id}" title="Sil">🗑</button>
         </div></td>
-      </tr>`
-    )
+      </tr>`;
+    })
     .join('');
   tb.querySelectorAll('[data-edit-mp]').forEach((b) =>
-    b.addEventListener('click', () => metalOpenPurchaseModal(metalPurchaseCache.find((x) => x.id == b.dataset.editMp)))
+    b.addEventListener('click', () => {
+      const row = metalPurchaseCache.find((x) => x.id == b.dataset.editMp);
+      if (row.kind === 'withdraw') metalOpenWithdrawModal(row);
+      else metalOpenPurchaseModal(row);
+    })
   );
   tb.querySelectorAll('[data-del-mp]').forEach((b) =>
     b.addEventListener('click', () => metalDelPurchase(b.dataset.delMp))
@@ -2760,6 +2771,68 @@ $('metalPurchaseForm').addEventListener('submit', async (e) => {
     localStorage.setItem('metalLastMetal', metal);
     if ($('mPPrice').value) localStorage.setItem('metalLastPrice_' + metal, $('mPPrice').value);
     closeModal('metalPurchaseModal');
+    metalRefreshAll();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
+// ---- Kıymetli maden çekim modalı ----
+// Çekim miktarı güncel ortalama maliyetle TL'ye çevrilip o oranda maliyetten
+// düşülür (sunucu tarafında); burada yalnızca mevcut bakiye önizlemesi yapılır.
+function metalUpdateWithdrawInfo() {
+  const metal = $('mWMetal').value;
+  const box = $('mWBalanceInfo');
+  const h = metalHoldingsByCode[metal];
+  const editId = $('mWId').value;
+  // Duzenlenen cekim, kendi tuttugu miktari bakiyeye geri eklemis gibi gosterilir
+  const editOldQty = editId ? Number((metalPurchaseCache.find((x) => x.id == editId) || {}).quantity || 0) : 0;
+  const available = (h ? h.quantity : 0) - editOldQty; // editOldQty negatif, cikarma geri ekler
+  if (!h || available <= 0) {
+    box.classList.remove('has-data');
+    box.innerHTML = `<strong>${esc(METAL_LABELS[metal] || metal)}</strong> — çekilebilir bakiye yok.`;
+    return;
+  }
+  box.classList.add('has-data');
+  box.innerHTML = `<strong>${esc(METAL_LABELS[metal] || metal)}</strong> — mevcut bakiye: <strong>${num(available)}</strong> gram, ort. maliyet <strong>${tl(h.avgCost)}</strong>/gr`;
+}
+
+function metalOpenWithdrawModal(row) {
+  $('metalWithdrawForm').reset();
+  $('mWError').classList.add('hidden');
+  if (row) {
+    $('metalWithdrawTitle').textContent = 'Kıymetli Maden Çekim Düzenle';
+    $('mWId').value = row.id;
+    $('mWDate').value = row.trade_date.slice(0, 10);
+    $('mWMetal').value = row.metal;
+    $('mWQty').value = Math.abs(row.quantity);
+  } else {
+    $('metalWithdrawTitle').textContent = 'Kıymetli Maden Çekim Ekle';
+    $('mWId').value = '';
+    $('mWDate').value = todayStr();
+    $('mWMetal').value = localStorage.getItem('metalLastMetal') || 'gold';
+  }
+  metalUpdateWithdrawInfo();
+  openModal('metalWithdrawModal');
+  focusDate('mWDate');
+}
+$('metalOpenWithdraw').addEventListener('click', () => metalOpenWithdrawModal(null));
+$('mWMetal').addEventListener('change', metalUpdateWithdrawInfo);
+
+$('metalWithdrawForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('mWError');
+  err.classList.add('hidden');
+  const id = $('mWId').value;
+  const body = JSON.stringify({
+    trade_date: $('mWDate').value,
+    metal: $('mWMetal').value,
+    quantity: $('mWQty').value,
+  });
+  try {
+    await api(id ? `/api/metal/withdrawals/${id}` : '/api/metal/withdrawals', { method: id ? 'PUT' : 'POST', body });
+    closeModal('metalWithdrawModal');
     metalRefreshAll();
   } catch (e2) {
     err.textContent = e2.message;

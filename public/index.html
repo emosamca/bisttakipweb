@@ -49,6 +49,7 @@
       </div>
       <div id="metalMenu" class="hidden">
         <button class="btn primary block" id="metalOpenPurchase">+ Kıymetli Maden Alım Ekle</button>
+        <button class="btn block" id="metalOpenWithdraw">− Kıymetli Maden Çekim Ekle</button>
       </div>
       <div id="currencyMenu" class="hidden">
         <button class="btn primary block" id="currencyOpenPurchase">+ Döviz Alım Ekle</button>
@@ -639,15 +640,15 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h3>Kıymetli Maden Alım Geçmişi</h3>
+            <h3>Kıymetli Maden Alım / Çekim Geçmişi</h3>
             <a class="btn ghost small" href="/api/export/metal.csv" download title="Excel/CSV olarak indir">⬇ CSV</a>
           </div>
           <div class="table-wrap">
             <table id="metalPurchasesTable">
               <thead>
                 <tr>
-                  <th>Tarih</th><th>Maden</th><th class="num">Gram</th>
-                  <th class="num">Alış (₺/gr)</th><th class="num">Toplam (₺)</th><th></th>
+                  <th>Tarih</th><th>Tür</th><th>Maden</th><th class="num">Gram</th>
+                  <th class="num">Fiyat (₺/gr)</th><th class="num">Toplam (₺)</th><th></th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -1453,6 +1454,38 @@
         <button type="submit" class="btn primary">Kaydet</button>
       </div>
       <div class="error hidden" id="mPError"></div>
+    </form>
+  </div>
+
+  <!-- KIYMETLI MADEN CEKIMI EKLE / DUZENLE MODAL -->
+  <div id="metalWithdrawModal" class="modal hidden">
+    <form class="modal-card" id="metalWithdrawForm">
+      <input type="hidden" id="mWId" />
+      <div class="modal-head">
+        <h3 id="metalWithdrawTitle">Kıymetli Maden Çekim Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="mWDate" lang="tr" required />
+        </label>
+        <label>Maden
+          <select id="mWMetal">
+            <option value="gold" selected>Altın</option>
+            <option value="silver">Gümüş</option>
+          </select>
+        </label>
+        <label>Çekim Miktarı (gram)
+          <input type="number" id="mWQty" step="any" min="0" required />
+        </label>
+      </div>
+      <div class="info-box" id="mWBalanceInfo">Maden seçin; mevcut bakiye burada gösterilir.</div>
+      <div class="info-box">Çekim, güncel ortalama maliyetle TL'ye çevrilip toplam maliyetten de düşülür; bu yüzden <strong>ortalama maliyet değişmez</strong>.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="mWError"></div>
     </form>
   </div>
 

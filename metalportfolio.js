@@ -15,6 +15,27 @@ async function priceMap() {
   return m;
 }
 
+// Bir madenin SU ANKI toplam gram adedi+maliyeti (butun alim+cekim satirlari dahil).
+// excludeId verilirse o satir disarida tutulur (cekim DUZENLEME'de "bu cekim hic
+// olmasaydi ortalama maliyet ne olurdu" sorusunun cevabi icin kullanilir).
+async function currentTotals(userId, metal, excludeId) {
+  const m = normMetal(metal);
+  const r = excludeId
+    ? await db.query(
+        `SELECT COALESCE(SUM(quantity),0) qty, COALESCE(SUM(total),0) cost
+           FROM metal_purchases WHERE user_id=$1 AND metal=$2 AND id<>$3`,
+        [userId, m, excludeId]
+      )
+    : await db.query(
+        `SELECT COALESCE(SUM(quantity),0) qty, COALESCE(SUM(total),0) cost
+           FROM metal_purchases WHERE user_id=$1 AND metal=$2`,
+        [userId, m]
+      );
+  const qty = Number(r.rows[0].qty);
+  const cost = Number(r.rows[0].cost);
+  return { qty, cost, avgCost: qty > 0 ? cost / qty : 0 };
+}
+
 // Bir tarihten ONCE (haric) o madenin gram adedi ve ortalama maliyeti (TL/gram)
 async function holdingsBeforeDate(userId, metal, date) {
   const m = normMetal(metal);
@@ -85,4 +106,4 @@ async function summary(userId) {
   };
 }
 
-module.exports = { priceMap, holdingsBeforeDate, holdings, summary };
+module.exports = { priceMap, currentTotals, holdingsBeforeDate, holdings, summary };

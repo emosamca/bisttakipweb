@@ -1086,8 +1086,8 @@ app.post('/api/metal/purchases', requireAuth, async (req, res) => {
   if (p.error) return res.status(400).json({ error: p.error });
   try {
     const r = await db.query(
-      `INSERT INTO metal_purchases (user_id, trade_date, metal, quantity, price, total)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      `INSERT INTO metal_purchases (user_id, trade_date, metal, quantity, price, total, kind)
+       VALUES ($1,$2,$3,$4,$5,$6,'buy') RETURNING *`,
       [req.session.userId, p.trade_date, p.metal, p.qty, p.prc, p.total]
     );
     res.json(r.rows[0]);
@@ -1097,6 +1097,7 @@ app.post('/api/metal/purchases', requireAuth, async (req, res) => {
   }
 });
 
+// kind='buy' sarti: cekim satirini yanlislikla alim gibi guncellemesin
 app.put('/api/metal/purchases/:id', requireAuth, async (req, res) => {
   const p = readMetalPurchase(req.body);
   if (!p) return res.status(400).json({ error: 'Tarih, maden, gram ve fiyat gerekli' });
@@ -1104,7 +1105,7 @@ app.put('/api/metal/purchases/:id', requireAuth, async (req, res) => {
   try {
     const r = await db.query(
       `UPDATE metal_purchases SET trade_date=$1, metal=$2, quantity=$3, price=$4, total=$5
-        WHERE id=$6 AND user_id=$7 RETURNING *`,
+        WHERE id=$6 AND user_id=$7 AND kind='buy' RETURNING *`,
       [p.trade_date, p.metal, p.qty, p.prc, p.total, req.params.id, req.session.userId]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Kayit bulunamadi' });
@@ -1115,6 +1116,7 @@ app.put('/api/metal/purchases/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Alim + cekim ortak tablo oldugundan silme her iki turde de aynidir
 app.delete('/api/metal/purchases/:id', requireAuth, async (req, res) => {
   try {
     await db.query('DELETE FROM metal_purchases WHERE id=$1 AND user_id=$2', [req.params.id, req.session.userId]);
@@ -1122,6 +1124,70 @@ app.delete('/api/metal/purchases/:id', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Silinemedi' });
+  }
+});
+
+// ---- Maden CEKIMI: toplam gramdan duser, ortalama maliyeti DEGISTIRMEZ ----
+// Cekilen gram, cekim anindaki ortalama maliyetle TL'ye cevrilip ayni
+// oranda maliyetten de dusulur (negatif quantity/total); SUM bazli ortalama
+// maliyet formulu bu sayede degismeden kalir (doviz cekimiyle ayni mantik).
+function readMetalWithdrawal(body) {
+  const { trade_date, metal } = body || {};
+  const quantity = Number((body || {}).quantity);
+  if (!trade_date || !metal || !(quantity > 0)) return null;
+  const m = String(metal).trim().toLowerCase();
+  if (m !== 'gold' && m !== 'silver') return { error: 'Maden altin veya gumus olmali' };
+  return { trade_date, metal: m, qty: quantity };
+}
+
+app.post('/api/metal/withdrawals', requireAuth, async (req, res) => {
+  const w = readMetalWithdrawal(req.body);
+  if (!w) return res.status(400).json({ error: 'Tarih, maden ve gram gerekli' });
+  if (w.error) return res.status(400).json({ error: w.error });
+  try {
+    const { qty: available, avgCost } = await metalportfolio.currentTotals(req.session.userId, w.metal);
+    if (w.qty > available + 1e-6) {
+      return res.status(400).json({ error: `Yetersiz bakiye: elinizde ${available.toFixed(4)} gram var` });
+    }
+    const total = -Math.round(w.qty * avgCost * 10000) / 10000;
+    const r = await db.query(
+      `INSERT INTO metal_purchases (user_id, trade_date, metal, quantity, price, total, kind)
+       VALUES ($1,$2,$3,$4,$5,$6,'withdraw') RETURNING *`,
+      [req.session.userId, w.trade_date, w.metal, -w.qty, avgCost, total]
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Cekim kaydedilemedi' });
+  }
+});
+
+app.put('/api/metal/withdrawals/:id', requireAuth, async (req, res) => {
+  const w = readMetalWithdrawal(req.body);
+  if (!w) return res.status(400).json({ error: 'Tarih, maden ve gram gerekli' });
+  if (w.error) return res.status(400).json({ error: w.error });
+  try {
+    const id = Number(req.params.id);
+    const existing = await db.query(
+      `SELECT id FROM metal_purchases WHERE id=$1 AND user_id=$2 AND kind='withdraw'`,
+      [id, req.session.userId]
+    );
+    if (!existing.rows.length) return res.status(404).json({ error: 'Kayit bulunamadi' });
+    // Bu cekim hic olmasaydi mevcut bakiye/ortalama maliyet ne olurdu?
+    const { qty: available, avgCost } = await metalportfolio.currentTotals(req.session.userId, w.metal, id);
+    if (w.qty > available + 1e-6) {
+      return res.status(400).json({ error: `Yetersiz bakiye: elinizde ${available.toFixed(4)} gram var` });
+    }
+    const total = -Math.round(w.qty * avgCost * 10000) / 10000;
+    const r = await db.query(
+      `UPDATE metal_purchases SET trade_date=$1, metal=$2, quantity=$3, price=$4, total=$5
+        WHERE id=$6 AND user_id=$7 AND kind='withdraw' RETURNING *`,
+      [w.trade_date, w.metal, -w.qty, avgCost, total, id, req.session.userId]
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Guncellenemedi' });
   }
 });
 

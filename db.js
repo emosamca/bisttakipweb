@@ -162,14 +162,19 @@ CREATE TABLE IF NOT EXISTS fx_rates (
 
 -- ===================== KIYMETLI MADEN tablolari =====================
 -- Tamamen ayri; mevcut yapiyi etkilemez. Komisyon yok; sadece alim.
+-- Cekim satirlari NEGATIF quantity/total ile tutulur (kind='withdraw');
+-- bu sayede SUM(quantity)/SUM(total) tabanli ortalama maliyet hesabi
+-- hicbir ek kod degisikligi gerektirmeden dogru sonucu verir (doviz'deki
+-- cekim mantigiyla ayni).
 CREATE TABLE IF NOT EXISTS metal_purchases (
   id          SERIAL PRIMARY KEY,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   trade_date  DATE NOT NULL,
   metal       TEXT NOT NULL,                                  -- 'gold' | 'silver'
-  quantity    NUMERIC(18,4) NOT NULL CHECK (quantity > 0),    -- gram
-  price       NUMERIC(18,4) NOT NULL CHECK (price >= 0),      -- TL / gram
-  total       NUMERIC(18,4) NOT NULL,                         -- TL (gram * fiyat)
+  quantity    NUMERIC(18,4) NOT NULL CHECK (quantity <> 0),   -- gram; cekimde negatif
+  price       NUMERIC(18,4) NOT NULL CHECK (price >= 0),      -- TL / gram (alis / cekimdeki ort. maliyet)
+  total       NUMERIC(18,4) NOT NULL,                         -- TL (gram * fiyat); cekimde negatif
+  kind        TEXT NOT NULL DEFAULT 'buy',                    -- 'buy' | 'withdraw'
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_metal_purchases_user ON metal_purchases(user_id, metal);
@@ -376,6 +381,11 @@ ALTER TABLE fund_prices ADD COLUMN IF NOT EXISTS price_old NUMERIC(18,6) NOT NUL
 ALTER TABLE currency_purchases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'buy';
 ALTER TABLE currency_purchases DROP CONSTRAINT IF EXISTS currency_purchases_quantity_check;
 ALTER TABLE currency_purchases ADD CONSTRAINT currency_purchases_quantity_check CHECK (quantity <> 0);
+
+-- Maden cekimi: kayit turu + negatif adede izin ver (eski kisit quantity > 0 idi)
+ALTER TABLE metal_purchases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'buy';
+ALTER TABLE metal_purchases DROP CONSTRAINT IF EXISTS metal_purchases_quantity_check;
+ALTER TABLE metal_purchases ADD CONSTRAINT metal_purchases_quantity_check CHECK (quantity <> 0);
 
 -- Gecmisi olmayan kullanicilar icin mevcut parolayi gecmise tohumla
 INSERT INTO password_history (user_id, password)
