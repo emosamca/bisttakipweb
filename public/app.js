@@ -3291,6 +3291,19 @@ async function fundsRefreshAll() {
   await Promise.all([fundsLoadSummary(), fundsLoadPrices(), fundsLoadPurchases()]);
 }
 
+// Fon verilerini sifirla: fon alimlari + guncel fon fiyatlari tablosu silinir
+// (snapshot'lara dokunulmaz). Geri alinamayan bir islem oldugundan iki kez sorulur.
+$('fundsResetBtn').addEventListener('click', async () => {
+  if (!confirm('Tüm fon alımlarınız ve güncel fon fiyatları silinecek. Emin misiniz?')) return;
+  if (!confirm('Bu işlem geri alınamaz. Fon verilerini sıfırlamak istediğinize kesinlikle emin misiniz?')) return;
+  try {
+    await api('/api/funds/reset', { method: 'POST' });
+    await fundsRefreshAll();
+  } catch (e2) {
+    alert(e2.message);
+  }
+});
+
 async function fundsLoadSummary() {
   const s = await api('/api/funds/summary');
   $('fnCardCost').textContent = tl(s.totalCost);

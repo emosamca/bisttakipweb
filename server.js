@@ -2610,6 +2610,22 @@ app.delete('/api/funds/purchases/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Fon panelini sifirla: GIRIS YAPAN kullanicinin fon alimlarini siler;
+// fund_prices + fund_price_last_good tum kullanicilar arasinda PAYLASILAN
+// tablolar oldugundan tamamen temizlenir (servis yeni alimla yeniden tohumlar).
+// Snapshot'lara (portfolio_snapshots) dokunulmaz.
+app.post('/api/funds/reset', requireAuth, async (req, res) => {
+  try {
+    const del = await db.query('DELETE FROM fund_purchases WHERE user_id=$1', [req.session.userId]);
+    await db.query('DELETE FROM fund_prices');
+    await db.query('DELETE FROM fund_price_last_good');
+    res.json({ ok: true, deletedPurchases: del.rowCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sifirlanamadi' });
+  }
+});
+
 // ---- Statik dosyalar ----
 // no-cache: tarayici her seferinde dogrulasin (eski app.js/styles.css takilmasin)
 app.use(
