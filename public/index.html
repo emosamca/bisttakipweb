@@ -52,6 +52,7 @@
       </div>
       <div id="currencyMenu" class="hidden">
         <button class="btn primary block" id="currencyOpenPurchase">+ Döviz Alım Ekle</button>
+        <button class="btn block" id="currencyOpenWithdraw">− Döviz Çekim Ekle</button>
       </div>
       <div id="cryptoMenu" class="hidden">
         <button class="btn primary block" id="cryptoOpenPurchase">+ Kripto Alım Ekle</button>
@@ -704,15 +705,15 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h3>Döviz Alım Geçmişi</h3>
+            <h3>Döviz Alım / Çekim Geçmişi</h3>
             <a class="btn ghost small" href="/api/export/currency.csv" download title="Excel/CSV olarak indir">⬇ CSV</a>
           </div>
           <div class="table-wrap">
             <table id="currencyPurchasesTable">
               <thead>
                 <tr>
-                  <th>Tarih</th><th>Döviz</th><th class="num">Adet</th>
-                  <th class="num">Alış Kuru (₺)</th><th class="num">Toplam (₺)</th><th></th>
+                  <th>Tarih</th><th>Tür</th><th>Döviz</th><th class="num">Adet</th>
+                  <th class="num">Kur (₺)</th><th class="num">Toplam (₺)</th><th></th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -1489,6 +1490,38 @@
         <button type="submit" class="btn primary">Kaydet</button>
       </div>
       <div class="error hidden" id="cPError"></div>
+    </form>
+  </div>
+
+  <!-- DOVIZ CEKIMI EKLE / DUZENLE MODAL -->
+  <div id="currencyWithdrawModal" class="modal hidden">
+    <form class="modal-card" id="currencyWithdrawForm">
+      <input type="hidden" id="cWId" />
+      <div class="modal-head">
+        <h3 id="currencyWithdrawTitle">Döviz Çekim Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="cWDate" lang="tr" required />
+        </label>
+        <label>Döviz
+          <select id="cWCurrency">
+            <option value="usd" selected>Dolar</option>
+            <option value="eur">Euro</option>
+          </select>
+        </label>
+        <label>Çekim Miktarı
+          <input type="number" id="cWQty" step="any" min="0" required />
+        </label>
+      </div>
+      <div class="info-box" id="cWBalanceInfo">Döviz seçin; mevcut bakiye burada gösterilir.</div>
+      <div class="info-box">Çekim, güncel ortalama maliyetle TL'ye çevrilip toplam maliyetten de düşülür; bu yüzden <strong>ortalama maliyet değişmez</strong>.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="cWError"></div>
     </form>
   </div>
 

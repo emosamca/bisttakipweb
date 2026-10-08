@@ -2774,8 +2774,13 @@ async function currencyRefreshAll() {
   await Promise.all([currencyLoadSummary(), currencyLoadPrices(), currencyLoadPurchases()]);
 }
 
+// Döviz bazinda { quantity, avgCost } — Çekim modalinda bakiye onizlemesi icin
+let currencyHoldingsByCode = {};
+
 async function currencyLoadSummary() {
   const s = await api('/api/currency/summary');
+  currencyHoldingsByCode = {};
+  s.holdings.forEach((h) => (currencyHoldingsByCode[h.currency] = { quantity: h.quantity, avgCost: h.avgCost }));
   $('cCardCost').textContent = tl(s.totalCost);
   $('cCardValue').textContent = s.totalValue != null ? tl(s.totalValue) : '—';
   if (s.totalProfit != null) {
@@ -2849,22 +2854,28 @@ function currencyRenderPurchases() {
   if (currencyPurchasePage > pages) currencyPurchasePage = pages;
   const pageRows = rows.slice((currencyPurchasePage - 1) * PAGE_SIZE, currencyPurchasePage * PAGE_SIZE);
   tb.innerHTML = pageRows
-    .map(
-      (r) => `<tr>
+    .map((r) => {
+      const isW = r.kind === 'withdraw';
+      return `<tr>
         <td>${r.trade_date.slice(0, 10)}</td>
+        <td><span class="tag ${isW ? 'withdraw' : 'buy'}">${isW ? 'Çekim' : 'Alım'}</span></td>
         <td><strong>${esc(CURRENCY_LABELS[r.currency] || r.currency)}</strong></td>
-        <td class="num">${num(r.quantity)}</td>
+        <td class="num${isW ? ' neg' : ''}">${isW ? '−' : ''}${num(Math.abs(r.quantity))}</td>
         <td class="num">${tl(r.price)}</td>
-        <td class="num">${tl(r.total)}</td>
+        <td class="num${isW ? ' neg' : ''}">${isW ? '−' : ''}${tl(Math.abs(r.total))}</td>
         <td><div class="row-actions">
           <button class="edit-btn" data-edit-cp="${r.id}" title="Düzenle">✏️</button>
           <button class="del-btn" data-del-cp="${r.id}" title="Sil">🗑</button>
         </div></td>
-      </tr>`
-    )
+      </tr>`;
+    })
     .join('');
   tb.querySelectorAll('[data-edit-cp]').forEach((b) =>
-    b.addEventListener('click', () => currencyOpenPurchaseModal(currencyPurchaseCache.find((x) => x.id == b.dataset.editCp)))
+    b.addEventListener('click', () => {
+      const row = currencyPurchaseCache.find((x) => x.id == b.dataset.editCp);
+      if (row.kind === 'withdraw') currencyOpenWithdrawModal(row);
+      else currencyOpenPurchaseModal(row);
+    })
   );
   tb.querySelectorAll('[data-del-cp]').forEach((b) =>
     b.addEventListener('click', () => currencyDelPurchase(b.dataset.delCp))
@@ -2970,6 +2981,69 @@ $('currencyPurchaseForm').addEventListener('submit', async (e) => {
     localStorage.setItem('currencyLastCurrency', cur);
     if ($('cPPrice').value) localStorage.setItem('currencyLastPrice_' + cur, $('cPPrice').value);
     closeModal('currencyPurchaseModal');
+    currencyRefreshAll();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
+// ---- Döviz çekim modalı ----
+// Çekim miktarı güncel ortalama maliyetle TL'ye çevrilip o oranda maliyetten
+// düşülür (sunucu tarafında); burada yalnızca mevcut bakiye önizlemesi yapılır.
+function currencyUpdateWithdrawInfo() {
+  const cur = $('cWCurrency').value;
+  const box = $('cWBalanceInfo');
+  const h = currencyHoldingsByCode[cur];
+  const editId = $('cWId').value;
+  // Duzenlenen cekim, kendi tuttugu miktari bakiyeye geri eklemis gibi gosterilir
+  // (editOldQty: bu satirin cekmis oldugu miktar; mevcut bakiye + bu miktar = "bu cekim yokmus gibi" bakiye)
+  const editOldQty = editId ? Number((currencyPurchaseCache.find((x) => x.id == editId) || {}).quantity || 0) : 0;
+  const available = (h ? h.quantity : 0) - editOldQty; // editOldQty negatif, cikarma geri ekler
+  if (!h || available <= 0) {
+    box.classList.remove('has-data');
+    box.innerHTML = `<strong>${esc(CURRENCY_LABELS[cur] || cur)}</strong> — çekilebilir bakiye yok.`;
+    return;
+  }
+  box.classList.add('has-data');
+  box.innerHTML = `<strong>${esc(CURRENCY_LABELS[cur] || cur)}</strong> — mevcut bakiye: <strong>${num(available)}</strong>, ort. maliyet <strong>${tl(h.avgCost)}</strong>`;
+}
+
+function currencyOpenWithdrawModal(row) {
+  $('currencyWithdrawForm').reset();
+  $('cWError').classList.add('hidden');
+  if (row) {
+    $('currencyWithdrawTitle').textContent = 'Döviz Çekim Düzenle';
+    $('cWId').value = row.id;
+    $('cWDate').value = row.trade_date.slice(0, 10);
+    $('cWCurrency').value = row.currency;
+    $('cWQty').value = Math.abs(row.quantity);
+  } else {
+    $('currencyWithdrawTitle').textContent = 'Döviz Çekim Ekle';
+    $('cWId').value = '';
+    $('cWDate').value = todayStr();
+    $('cWCurrency').value = localStorage.getItem('currencyLastCurrency') || 'usd';
+  }
+  currencyUpdateWithdrawInfo();
+  openModal('currencyWithdrawModal');
+  focusDate('cWDate');
+}
+$('currencyOpenWithdraw').addEventListener('click', () => currencyOpenWithdrawModal(null));
+$('cWCurrency').addEventListener('change', currencyUpdateWithdrawInfo);
+
+$('currencyWithdrawForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('cWError');
+  err.classList.add('hidden');
+  const id = $('cWId').value;
+  const body = JSON.stringify({
+    trade_date: $('cWDate').value,
+    currency: $('cWCurrency').value,
+    quantity: $('cWQty').value,
+  });
+  try {
+    await api(id ? `/api/currency/withdrawals/${id}` : '/api/currency/withdrawals', { method: id ? 'PUT' : 'POST', body });
+    closeModal('currencyWithdrawModal');
     currencyRefreshAll();
   } catch (e2) {
     err.textContent = e2.message;

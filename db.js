@@ -182,15 +182,20 @@ CREATE TABLE IF NOT EXISTS metal_prices (
 );
 
 -- ===================== DOVIZ tablolari =====================
--- Maden ile ayni mantik. Komisyon yok; sadece alim. Birim TL fiyati.
+-- Maden ile ayni mantik. Komisyon yok; alim + cekim. Birim TL fiyati.
+-- Cekim satirlari NEGATIF quantity/total ile tutulur (kind='withdraw');
+-- bu sayede SUM(quantity)/SUM(total) tabanli ortalama maliyet hesabi
+-- hicbir ek kod degisikligi gerektirmeden dogru sonucu verir (cekim,
+-- o anki ortalama maliyetle orantili dustugu icin maliyeti degistirmez).
 CREATE TABLE IF NOT EXISTS currency_purchases (
   id          SERIAL PRIMARY KEY,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   trade_date  DATE NOT NULL,
   currency    TEXT NOT NULL,                                  -- 'usd' | 'eur'
-  quantity    NUMERIC(18,4) NOT NULL CHECK (quantity > 0),    -- doviz adedi (USD/EUR)
-  price       NUMERIC(18,4) NOT NULL CHECK (price >= 0),      -- TL / birim (alis kuru)
-  total       NUMERIC(18,4) NOT NULL,                         -- TL (adet * kur)
+  quantity    NUMERIC(18,4) NOT NULL CHECK (quantity <> 0),   -- doviz adedi; cekimde negatif
+  price       NUMERIC(18,4) NOT NULL CHECK (price >= 0),      -- TL / birim (alis kuru / cekimdeki ort. maliyet)
+  total       NUMERIC(18,4) NOT NULL,                         -- TL (adet * kur); cekimde negatif
+  kind        TEXT NOT NULL DEFAULT 'buy',                    -- 'buy' | 'withdraw'
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_currency_purchases_user ON currency_purchases(user_id, currency);
@@ -366,6 +371,11 @@ ALTER TABLE telegram_settings ADD COLUMN IF NOT EXISTS monthly_chat_id TEXT;
 
 -- Fon fiyati servisten 0 gelirse yedek olarak kullanilacak onceki fiyat
 ALTER TABLE fund_prices ADD COLUMN IF NOT EXISTS price_old NUMERIC(18,6) NOT NULL DEFAULT 0;
+
+-- Doviz cekimi: kayit turu + negatif adede izin ver (eski kisit quantity > 0 idi)
+ALTER TABLE currency_purchases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'buy';
+ALTER TABLE currency_purchases DROP CONSTRAINT IF EXISTS currency_purchases_quantity_check;
+ALTER TABLE currency_purchases ADD CONSTRAINT currency_purchases_quantity_check CHECK (quantity <> 0);
 
 -- Gecmisi olmayan kullanicilar icin mevcut parolayi gecmise tohumla
 INSERT INTO password_history (user_id, password)

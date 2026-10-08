@@ -18,6 +18,27 @@ async function priceMap() {
   return m;
 }
 
+// Bir dovizin SU ANKI toplam adedi+maliyeti (butun alim+cekim satirlari dahil).
+// excludeId verilirse o satir disarida tutulur (cekim DUZENLEME'de "bu cekim
+// hic olmasaydi ortalama maliyet ne olurdu" sorusunun cevabi icin kullanilir).
+async function currentTotals(userId, currency, excludeId) {
+  const c = normCurrency(currency);
+  const r = excludeId
+    ? await db.query(
+        `SELECT COALESCE(SUM(quantity),0) qty, COALESCE(SUM(total),0) cost
+           FROM currency_purchases WHERE user_id=$1 AND currency=$2 AND id<>$3`,
+        [userId, c, excludeId]
+      )
+    : await db.query(
+        `SELECT COALESCE(SUM(quantity),0) qty, COALESCE(SUM(total),0) cost
+           FROM currency_purchases WHERE user_id=$1 AND currency=$2`,
+        [userId, c]
+      );
+  const qty = Number(r.rows[0].qty);
+  const cost = Number(r.rows[0].cost);
+  return { qty, cost, avgCost: qty > 0 ? cost / qty : 0 };
+}
+
 // Bir tarihten ONCE (haric) o dovizin adedi ve ortalama maliyeti (TL/birim)
 async function holdingsBeforeDate(userId, currency, date) {
   const c = normCurrency(currency);
@@ -103,4 +124,4 @@ async function pricesList() {
   });
 }
 
-module.exports = { priceMap, holdingsBeforeDate, holdings, summary, pricesList };
+module.exports = { priceMap, currentTotals, holdingsBeforeDate, holdings, summary, pricesList };
