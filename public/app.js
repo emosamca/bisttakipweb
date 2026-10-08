@@ -2218,8 +2218,13 @@ async function usRefreshAll() {
   await Promise.all([usLoadSummary(), usLoadPrices(), usLoadPurchases(), usLoadCash()]);
 }
 
+// Hisse bazinda { quantity, avgCost } — Çekim modalinde bakiye onizlemesi icin
+let usHoldingsByCode = {};
+
 async function usLoadSummary() {
   const s = await api('/api/us/summary');
+  usHoldingsByCode = {};
+  s.holdings.forEach((h) => (usHoldingsByCode[h.symbol] = { quantity: h.quantity, avgCost: h.avgCostUSD }));
   $('usCardRate').textContent = s.rate != null ? tl(s.rate) : '—';
   $('usCardCash').textContent = usd(s.cashUSD || 0);
   $('usCardCashTry').textContent = s.cashTRY != null ? tl(s.cashTRY) : '';
@@ -2305,16 +2310,17 @@ function usRenderPurchases() {
   const pageRows = rows.slice((usPurchasePage - 1) * PAGE_SIZE, usPurchasePage * PAGE_SIZE);
   tb.innerHTML = pageRows
     .map((r) => {
+      const isW = r.kind === 'withdraw';
       const costTry = r.usdtry ? Number(r.total) * Number(r.usdtry) : null;
       return `<tr>
         <td>${r.trade_date.slice(0, 10)}</td>
         <td><strong>${esc(r.symbol)}</strong></td>
-        <td class="num">${num(r.quantity)}</td>
+        <td class="num${isW ? ' neg' : ''}">${isW ? '−' : ''}${num(Math.abs(r.quantity))}</td>
         <td class="num">${usd(r.price)}</td>
-        <td class="num">${usd(r.total)}</td>
+        <td class="num${isW ? ' neg' : ''}">${isW ? '−' : ''}${usd(Math.abs(r.total))}</td>
         <td class="num">${r.usdtry ? num(r.usdtry) : '—'}</td>
-        <td class="num">${costTry != null ? tl(costTry) : '—'}</td>
-        <td><span class="tag ${r.source}">${r.source === 'temettu' ? 'Temettü' : 'Normal'}</span></td>
+        <td class="num${isW ? ' neg' : ''}">${costTry != null ? (isW ? '−' : '') + tl(Math.abs(costTry)) : '—'}</td>
+        <td><span class="tag ${isW ? 'withdraw' : r.source}">${isW ? 'Çekim' : srcLabel(r.source)}</span></td>
         <td><div class="row-actions">
           <button class="edit-btn" data-edit-up="${r.id}" title="Düzenle">✏️</button>
           <button class="del-btn" data-del-up="${r.id}" title="Sil">🗑</button>
@@ -2323,7 +2329,11 @@ function usRenderPurchases() {
     })
     .join('');
   tb.querySelectorAll('[data-edit-up]').forEach((b) =>
-    b.addEventListener('click', () => usOpenPurchaseModal(usPurchaseCache.find((x) => x.id == b.dataset.editUp)))
+    b.addEventListener('click', () => {
+      const row = usPurchaseCache.find((x) => x.id == b.dataset.editUp);
+      if (row.kind === 'withdraw') usOpenWithdrawModal(row);
+      else usOpenPurchaseModal(row);
+    })
   );
   tb.querySelectorAll('[data-del-up]').forEach((b) =>
     b.addEventListener('click', () => usDel('purchases', b.dataset.delUp))
@@ -2506,6 +2516,78 @@ $('usPurchaseForm').addEventListener('submit', async (e) => {
     if (sym) localStorage.setItem('usLastSymbol', sym);
     localStorage.setItem('usLastCommission', $('usPCommission').value || '');
     closeModal('usPurchaseModal');
+    usRefreshAll();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
+// ---- ABD çekim (satış) modalı ----
+// Çekim miktarı güncel ortalama maliyetle USD'ye çevrilip o oranda maliyetten
+// düşülür (sunucu tarafında); burada yalnızca mevcut bakiye önizlemesi yapılır.
+// Hisse secimi, zaten sahip olunan hisselerle sinirli (serbest metin degil).
+function usPopulateWithdrawSymbols(selected) {
+  const sel = $('usWSymbol');
+  const symbols = Object.keys(usHoldingsByCode).filter((s) => usHoldingsByCode[s].quantity > 0);
+  sel.innerHTML = symbols.length
+    ? symbols.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('')
+    : '<option value="">(hisse yok)</option>';
+  if (selected && symbols.includes(selected)) sel.value = selected;
+}
+
+function usUpdateWithdrawInfo() {
+  const sym = $('usWSymbol').value;
+  const box = $('usWBalanceInfo');
+  const h = usHoldingsByCode[sym];
+  const editId = $('usWId').value;
+  // Duzenlenen cekim, kendi tuttugu miktari bakiyeye geri eklemis gibi gosterilir
+  const editOldQty = editId ? Number((usPurchaseCache.find((x) => x.id == editId) || {}).quantity || 0) : 0;
+  const available = (h ? h.quantity : 0) - editOldQty; // editOldQty negatif, cikarma geri ekler
+  if (!h || available <= 0) {
+    box.classList.remove('has-data');
+    box.innerHTML = sym ? `<strong>${esc(sym)}</strong> — çekilebilir bakiye yok.` : 'Çekilebilecek hisse yok.';
+    return;
+  }
+  box.classList.add('has-data');
+  box.innerHTML = `<strong>${esc(sym)}</strong> — mevcut bakiye: <strong>${num(available)}</strong>, ort. maliyet <strong>${usd(h.avgCost)}</strong>`;
+}
+
+function usOpenWithdrawModal(row) {
+  $('usWithdrawForm').reset();
+  $('usWError').classList.add('hidden');
+  if (row) {
+    $('usWithdrawTitle').textContent = 'ABD Çekim (Satış) Düzenle';
+    $('usWId').value = row.id;
+    $('usWDate').value = row.trade_date.slice(0, 10);
+    usPopulateWithdrawSymbols(row.symbol);
+    $('usWQty').value = Math.abs(row.quantity);
+  } else {
+    $('usWithdrawTitle').textContent = 'ABD Çekim (Satış) Ekle';
+    $('usWId').value = '';
+    $('usWDate').value = todayStr();
+    usPopulateWithdrawSymbols();
+  }
+  usUpdateWithdrawInfo();
+  openModal('usWithdrawModal');
+  focusDate('usWDate');
+}
+$('usOpenWithdraw').addEventListener('click', () => usOpenWithdrawModal(null));
+$('usWSymbol').addEventListener('change', usUpdateWithdrawInfo);
+
+$('usWithdrawForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('usWError');
+  err.classList.add('hidden');
+  const id = $('usWId').value;
+  const body = JSON.stringify({
+    trade_date: $('usWDate').value,
+    symbol: $('usWSymbol').value,
+    quantity: $('usWQty').value,
+  });
+  try {
+    await api(id ? `/api/us/withdrawals/${id}` : '/api/us/withdrawals', { method: id ? 'PUT' : 'POST', body });
+    closeModal('usWithdrawModal');
     usRefreshAll();
   } catch (e2) {
     err.textContent = e2.message;

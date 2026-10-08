@@ -65,6 +65,38 @@ async function priceMap() {
   return m;
 }
 
+// Bir hissenin SU ANKI toplam adedi+maliyeti (butun alim+cekim satirlari dahil).
+// avgCostTRY, maliyet-agirlikli ortalama USD/TRY kurudur (costTRY/costUSD);
+// cekim satirinin usdtry alanina bu yazilirsa TL maliyet de USD maliyetle
+// AYNI ORANDA azalir, boylece TL bazli ortalama maliyet de degismez.
+// excludeId verilirse o satir disarida tutulur (cekim DUZENLEME'de "bu cekim
+// hic olmasaydi ortalama maliyet ne olurdu" sorusunun cevabi icin kullanilir).
+async function currentTotals(userId, symbol, excludeId) {
+  const sym = symbol.trim().toUpperCase();
+  const r = excludeId
+    ? await db.query(
+        `SELECT COALESCE(SUM(quantity),0) qty, COALESCE(SUM(total),0) costUsd,
+                COALESCE(SUM(total * COALESCE(usdtry,0)),0) costTry
+           FROM us_purchases WHERE user_id=$1 AND symbol=$2 AND id<>$3`,
+        [userId, sym, excludeId]
+      )
+    : await db.query(
+        `SELECT COALESCE(SUM(quantity),0) qty, COALESCE(SUM(total),0) costUsd,
+                COALESCE(SUM(total * COALESCE(usdtry,0)),0) costTry
+           FROM us_purchases WHERE user_id=$1 AND symbol=$2`,
+        [userId, sym]
+      );
+  const qty = Number(r.rows[0].qty);
+  const costUsd = Number(r.rows[0].costusd);
+  const costTry = Number(r.rows[0].costtry);
+  return {
+    qty,
+    costUsd,
+    avgCostUsd: qty > 0 ? costUsd / qty : 0,
+    avgRateTry: costUsd > 0 ? costTry / costUsd : 0,
+  };
+}
+
 // Bir tarihten ONCE (haric) o hissenin adedi ve ortalama maliyeti (USD)
 async function holdingsBeforeDate(userId, symbol, date) {
   const sym = symbol.trim().toUpperCase();
@@ -185,6 +217,7 @@ module.exports = {
   rateOnDate,
   priceOnDate,
   priceMap,
+  currentTotals,
   holdingsBeforeDate,
   holdings,
   cashBalance,

@@ -106,18 +106,24 @@ CREATE TABLE IF NOT EXISTS prices (
 
 -- ===================== ABD (US) tablolari =====================
 -- Tamamen ayri; mevcut BIST yapisini etkilemez.
+-- Cekim (satis) satirlari NEGATIF quantity/total ile tutulur (kind='withdraw');
+-- bu sayede SUM(quantity)/SUM(total) tabanli ortalama maliyet hesabi hicbir ek
+-- kod degisikligi gerektirmeden dogru sonucu verir (doviz/maden/kripto cekimiyle
+-- ayni mantik). usdtry da maliyet-agirlikli ortalama kur olarak yazilir ki TL
+-- maliyet de ayni sekilde korunsun. Binance paneli bu kapsama girmiyor.
 CREATE TABLE IF NOT EXISTS us_purchases (
   id              SERIAL PRIMARY KEY,
   user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   trade_date      DATE NOT NULL,
   symbol          TEXT NOT NULL,
-  quantity        NUMERIC(18,6) NOT NULL CHECK (quantity > 0),
-  price           NUMERIC(18,6) NOT NULL CHECK (price >= 0),   -- USD
+  quantity        NUMERIC(18,6) NOT NULL CHECK (quantity <> 0),  -- cekimde negatif
+  price           NUMERIC(18,6) NOT NULL CHECK (price >= 0),   -- USD (alis / cekimdeki ort. maliyet)
   source          TEXT NOT NULL DEFAULT 'normal',
-  usdtry          NUMERIC(18,6),                               -- alis anindaki USD/TRY
+  usdtry          NUMERIC(18,6),                               -- alis anindaki / cekimdeki ort. USD/TRY
   commission_rate NUMERIC(8,4) NOT NULL DEFAULT 0,
   bsmv_rate       NUMERIC(8,4) NOT NULL DEFAULT 0,
-  total           NUMERIC(18,6) NOT NULL,                      -- USD, masraf dahil
+  total           NUMERIC(18,6) NOT NULL,                      -- USD, masraf dahil; cekimde negatif
+  kind            TEXT NOT NULL DEFAULT 'buy',                 -- 'buy' | 'withdraw'
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_us_purchases_user ON us_purchases(user_id);
@@ -396,6 +402,11 @@ ALTER TABLE metal_purchases ADD CONSTRAINT metal_purchases_quantity_check CHECK 
 ALTER TABLE crypto_purchases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'buy';
 ALTER TABLE crypto_purchases DROP CONSTRAINT IF EXISTS crypto_purchases_quantity_check;
 ALTER TABLE crypto_purchases ADD CONSTRAINT crypto_purchases_quantity_check CHECK (quantity <> 0);
+
+-- ABD cekimi (satis): kayit turu + negatif adede izin ver (eski kisit quantity > 0 idi)
+ALTER TABLE us_purchases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'buy';
+ALTER TABLE us_purchases DROP CONSTRAINT IF EXISTS us_purchases_quantity_check;
+ALTER TABLE us_purchases ADD CONSTRAINT us_purchases_quantity_check CHECK (quantity <> 0);
 
 -- Gecmisi olmayan kullanicilar icin mevcut parolayi gecmise tohumla
 INSERT INTO password_history (user_id, password)

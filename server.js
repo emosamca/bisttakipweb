@@ -914,8 +914,8 @@ app.post('/api/us/purchases', requireAuth, async (req, res) => {
   if (p.error) return res.status(400).json({ error: p.error });
   try {
     const r = await db.query(
-      `INSERT INTO us_purchases (user_id, trade_date, symbol, quantity, price, source, usdtry, commission, total)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      `INSERT INTO us_purchases (user_id, trade_date, symbol, quantity, price, source, usdtry, commission, total, kind)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'buy') RETURNING *`,
       [req.session.userId, p.trade_date, p.symbol, p.qty, p.prc, p.src, p.fx, p.comm, p.total]
     );
     await db.query('INSERT INTO us_prices (symbol, price) VALUES ($1, 0) ON CONFLICT (symbol) DO NOTHING', [p.symbol]);
@@ -926,6 +926,7 @@ app.post('/api/us/purchases', requireAuth, async (req, res) => {
   }
 });
 
+// kind='buy' sarti: cekim satirini yanlislikla alim gibi guncellemesin
 app.put('/api/us/purchases/:id', requireAuth, async (req, res) => {
   const p = readUsPurchase(req.body);
   if (!p) return res.status(400).json({ error: 'Tarih, hisse, adet ve fiyat gerekli' });
@@ -934,7 +935,7 @@ app.put('/api/us/purchases/:id', requireAuth, async (req, res) => {
     const r = await db.query(
       `UPDATE us_purchases SET trade_date=$1, symbol=$2, quantity=$3, price=$4, source=$5,
               usdtry=$6, commission=$7, total=$8
-        WHERE id=$9 AND user_id=$10 RETURNING *`,
+        WHERE id=$9 AND user_id=$10 AND kind='buy' RETURNING *`,
       [p.trade_date, p.symbol, p.qty, p.prc, p.src, p.fx, p.comm, p.total, req.params.id, req.session.userId]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Kayit bulunamadi' });
@@ -945,6 +946,7 @@ app.put('/api/us/purchases/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Alim + cekim ortak tablo oldugundan silme her iki turde de aynidir
 app.delete('/api/us/purchases/:id', requireAuth, async (req, res) => {
   try {
     await db.query('DELETE FROM us_purchases WHERE id=$1 AND user_id=$2', [req.params.id, req.session.userId]);
@@ -952,6 +954,67 @@ app.delete('/api/us/purchases/:id', requireAuth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Silinemedi' });
+  }
+});
+
+// ---- ABD CEKIMI (satis): toplam adetten duser, ortalama maliyeti DEGISTIRMEZ ----
+// Cekilen adet, cekim anindaki ortalama maliyetle USD'ye cevrilip ayni oranda
+// maliyetten de dusulur (negatif quantity/total); usdtry alanina maliyet-
+// agirlikli ortalama kur yazilir ki TL maliyet de ayni oranda korunsun.
+// Komisyon alinmaz (diger siniflardaki cekimle ayni: ek masraf yok).
+function readUsWithdrawal(body) {
+  const { trade_date, symbol } = body || {};
+  const quantity = Number((body || {}).quantity);
+  if (!trade_date || !symbol || !(quantity > 0)) return null;
+  return { trade_date, symbol: symbol.trim().toUpperCase(), qty: quantity };
+}
+
+app.post('/api/us/withdrawals', requireAuth, async (req, res) => {
+  const w = readUsWithdrawal(req.body);
+  if (!w) return res.status(400).json({ error: 'Tarih, hisse ve adet gerekli' });
+  try {
+    const { qty: available, avgCostUsd, avgRateTry } = await usportfolio.currentTotals(req.session.userId, w.symbol);
+    if (w.qty > available + 1e-6) {
+      return res.status(400).json({ error: `Yetersiz bakiye: elinizde ${available} ${w.symbol} var` });
+    }
+    const total = -Math.round(w.qty * avgCostUsd * 1e6) / 1e6;
+    const r = await db.query(
+      `INSERT INTO us_purchases (user_id, trade_date, symbol, quantity, price, usdtry, commission, total, kind)
+       VALUES ($1,$2,$3,$4,$5,$6,0,$7,'withdraw') RETURNING *`,
+      [req.session.userId, w.trade_date, w.symbol, -w.qty, avgCostUsd, avgRateTry || null, total]
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Cekim kaydedilemedi' });
+  }
+});
+
+app.put('/api/us/withdrawals/:id', requireAuth, async (req, res) => {
+  const w = readUsWithdrawal(req.body);
+  if (!w) return res.status(400).json({ error: 'Tarih, hisse ve adet gerekli' });
+  try {
+    const id = Number(req.params.id);
+    const existing = await db.query(
+      `SELECT id FROM us_purchases WHERE id=$1 AND user_id=$2 AND kind='withdraw'`,
+      [id, req.session.userId]
+    );
+    if (!existing.rows.length) return res.status(404).json({ error: 'Kayit bulunamadi' });
+    // Bu cekim hic olmasaydi mevcut bakiye/ortalama maliyet ne olurdu?
+    const { qty: available, avgCostUsd, avgRateTry } = await usportfolio.currentTotals(req.session.userId, w.symbol, id);
+    if (w.qty > available + 1e-6) {
+      return res.status(400).json({ error: `Yetersiz bakiye: elinizde ${available} ${w.symbol} var` });
+    }
+    const total = -Math.round(w.qty * avgCostUsd * 1e6) / 1e6;
+    const r = await db.query(
+      `UPDATE us_purchases SET trade_date=$1, symbol=$2, quantity=$3, price=$4, usdtry=$5, total=$6
+        WHERE id=$7 AND user_id=$8 AND kind='withdraw' RETURNING *`,
+      [w.trade_date, w.symbol, -w.qty, avgCostUsd, avgRateTry || null, total, id, req.session.userId]
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Guncellenemedi' });
   }
 });
 

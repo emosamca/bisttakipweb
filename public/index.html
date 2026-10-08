@@ -45,6 +45,7 @@
       </div>
       <div id="usMenu" class="hidden">
         <button class="btn primary block" id="usOpenPurchase">+ ABD Alım Ekle</button>
+        <button class="btn block" id="usOpenWithdraw">− ABD Çekim (Satış) Ekle</button>
         <button class="btn block" id="usOpenCash">+ ABD Nakit / Temettü Ekle</button>
       </div>
       <div id="metalMenu" class="hidden">
@@ -573,7 +574,7 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h3>ABD Alım Geçmişi</h3>
+            <h3>ABD Alım / Çekim Geçmişi</h3>
             <a class="btn ghost small" href="/api/export/us.csv" download title="Excel/CSV olarak indir">⬇ CSV</a>
           </div>
           <div class="table-wrap">
@@ -1387,6 +1388,35 @@
         <button type="submit" class="btn primary">Kaydet</button>
       </div>
       <div class="error hidden" id="usPError"></div>
+    </form>
+  </div>
+
+  <!-- ABD CEKIMI (SATIS) EKLE / DUZENLE MODAL -->
+  <div id="usWithdrawModal" class="modal hidden">
+    <form class="modal-card" id="usWithdrawForm">
+      <input type="hidden" id="usWId" />
+      <div class="modal-head">
+        <h3 id="usWithdrawTitle">ABD Çekim (Satış) Ekle</h3>
+        <button type="button" class="x" data-close>×</button>
+      </div>
+      <div class="grid2">
+        <label>Tarih
+          <input type="date" id="usWDate" lang="tr" required />
+        </label>
+        <label>Hisse
+          <select id="usWSymbol"></select>
+        </label>
+        <label>Hisse Adedi
+          <input type="number" id="usWQty" step="any" min="0" required />
+        </label>
+      </div>
+      <div class="info-box" id="usWBalanceInfo">Hisse seçin; mevcut bakiye burada gösterilir.</div>
+      <div class="info-box">Çekim, güncel ortalama maliyetle USD'ye çevrilip toplam maliyetten de düşülür; komisyon alınmaz, <strong>ortalama maliyet değişmez</strong>.</div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close>İptal</button>
+        <button type="submit" class="btn primary">Kaydet</button>
+      </div>
+      <div class="error hidden" id="usWError"></div>
     </form>
   </div>
 
