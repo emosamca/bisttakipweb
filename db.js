@@ -67,18 +67,25 @@ CREATE TABLE IF NOT EXISTS password_history (
 CREATE INDEX IF NOT EXISTS idx_pwhist_user ON password_history(user_id);
 
 -- Hisse alimlari
+-- Cekim (satis) satirlari NEGATIF quantity/total ile tutulur (kind='withdraw');
+-- bu sayede SUM(quantity)/SUM(total) tabanli ortalama maliyet hesabi hicbir ek
+-- kod degisikligi gerektirmeden dogru sonucu verir (doviz/maden/kripto/ABD
+-- cekimiyle ayni mantik; bedelsiz/bedelli de ayni "ozel satir" felsefesini
+-- kullanir). cashBalance = girisler - SUM(total) oldugundan, satis satirinin
+-- negatif total'i nakit bakiyeyi otomatik artirir (ek kod gerekmez).
 CREATE TABLE IF NOT EXISTS purchases (
   id          SERIAL PRIMARY KEY,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   trade_date  DATE NOT NULL,
   symbol      TEXT NOT NULL,
-  quantity    NUMERIC(18,4) NOT NULL CHECK (quantity > 0),
+  quantity    NUMERIC(18,4) NOT NULL CHECK (quantity <> 0),  -- cekimde negatif
   price       NUMERIC(18,4) NOT NULL CHECK (price >= 0),
-  source          TEXT NOT NULL DEFAULT 'normal',   -- 'normal' | 'temettu'
+  source          TEXT NOT NULL DEFAULT 'normal',   -- 'normal' | 'temettu' | 'bedelsiz' | 'bedelli'
   usd_rate        NUMERIC(18,6),                    -- alis anindaki dolar kuru (TL/USD)
   commission_rate NUMERIC(8,4) NOT NULL DEFAULT 0,  -- komisyon yuzdesi
   bsmv_rate       NUMERIC(8,4) NOT NULL DEFAULT 0,  -- bsmv yuzdesi (komisyon uzerine)
-  total           NUMERIC(18,4) NOT NULL,           -- ara toplam + komisyon + bsmv
+  total           NUMERIC(18,4) NOT NULL,           -- ara toplam + komisyon + bsmv; cekimde negatif
+  kind            TEXT NOT NULL DEFAULT 'buy',      -- 'buy' | 'withdraw'
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -407,6 +414,11 @@ ALTER TABLE crypto_purchases ADD CONSTRAINT crypto_purchases_quantity_check CHEC
 ALTER TABLE us_purchases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'buy';
 ALTER TABLE us_purchases DROP CONSTRAINT IF EXISTS us_purchases_quantity_check;
 ALTER TABLE us_purchases ADD CONSTRAINT us_purchases_quantity_check CHECK (quantity <> 0);
+
+-- BIST cekimi (satis): kayit turu + negatif adede izin ver (eski kisit quantity > 0 idi)
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'buy';
+ALTER TABLE purchases DROP CONSTRAINT IF EXISTS purchases_quantity_check;
+ALTER TABLE purchases ADD CONSTRAINT purchases_quantity_check CHECK (quantity <> 0);
 
 -- Gecmisi olmayan kullanicilar icin mevcut parolayi gecmise tohumla
 INSERT INTO password_history (user_id, password)

@@ -485,8 +485,8 @@ app.post('/api/purchases', requireAuth, async (req, res) => {
   const sym = symbol.trim().toUpperCase();
   try {
     const r = await db.query(
-      `INSERT INTO purchases (user_id, trade_date, symbol, quantity, price, source, usd_rate, commission_rate, bsmv_rate, total)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      `INSERT INTO purchases (user_id, trade_date, symbol, quantity, price, source, usd_rate, commission_rate, bsmv_rate, total, kind)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'buy') RETURNING *`,
       [req.session.userId, trade_date, sym, qty, prc, src, usd, comm, bsmv, total]
     );
     // Daha once girilmemis bir hisse ise ortak fiyat tablosuna 0 ile ekle
@@ -684,7 +684,7 @@ app.delete('/api/cash/:id', requireAuth, async (req, res) => {
   }
 });
 
-// ---- Alim duzenle ----
+// ---- Alim duzenle ---- (kind='buy' sarti: cekim satirini yanlislikla alim gibi guncellemesin)
 app.put('/api/purchases/:id', requireAuth, async (req, res) => {
   const { trade_date, symbol, quantity, price, source, usd_rate, commission_rate, bsmv_rate } =
     req.body || {};
@@ -706,10 +706,73 @@ app.put('/api/purchases/:id', requireAuth, async (req, res) => {
       `UPDATE purchases
           SET trade_date=$1, symbol=$2, quantity=$3, price=$4, source=$5, usd_rate=$6,
               commission_rate=$7, bsmv_rate=$8, total=$9
-        WHERE id=$10 AND user_id=$11 RETURNING *`,
+        WHERE id=$10 AND user_id=$11 AND kind='buy' RETURNING *`,
       [trade_date, symbol.trim().toUpperCase(), qty, prc, src, usd, comm, bsmv, total, req.params.id, req.session.userId]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Kayit bulunamadi' });
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Guncellenemedi' });
+  }
+});
+
+// ---- BIST CEKIMI (satis): toplam adetten duser, ortalama maliyeti DEGISTIRMEZ ----
+// Cekilen adet, cekim anindaki ortalama maliyetle (temettu dususu dahil) TL'ye
+// cevrilip ayni oranda maliyetten de dusulur (negatif quantity/total); SUM
+// bazli ortalama maliyet formulu bu sayede degismeden kalir. Komisyon alinmaz.
+// cashBalance = girisler - SUM(total) oldugundan, negatif total nakit bakiyeyi
+// otomatik artirir (satildigi varsayilan tutar MALIYET uzerinden, guncel
+// piyasa fiyati uzerinden degil -> gerceklesen kar/zarar nakde yansimaz).
+function readBistWithdrawal(body) {
+  const { trade_date, symbol } = body || {};
+  const quantity = Number((body || {}).quantity);
+  if (!trade_date || !symbol || !(quantity > 0)) return null;
+  return { trade_date, symbol: symbol.trim().toUpperCase(), qty: quantity };
+}
+
+app.post('/api/purchases/withdrawals', requireAuth, async (req, res) => {
+  const w = readBistWithdrawal(req.body);
+  if (!w) return res.status(400).json({ error: 'Tarih, hisse ve adet gerekli' });
+  try {
+    const { qty: available, avgCost } = await portfolio.currentTotals(req.session.userId, w.symbol);
+    if (w.qty > available + 1e-6) {
+      return res.status(400).json({ error: `Yetersiz bakiye: elinizde ${available} ${w.symbol} var` });
+    }
+    const total = -Math.round(w.qty * avgCost * 10000) / 10000;
+    const r = await db.query(
+      `INSERT INTO purchases (user_id, trade_date, symbol, quantity, price, total, kind)
+       VALUES ($1,$2,$3,$4,$5,$6,'withdraw') RETURNING *`,
+      [req.session.userId, w.trade_date, w.symbol, -w.qty, avgCost, total]
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Satis kaydedilemedi' });
+  }
+});
+
+app.put('/api/purchases/withdrawals/:id', requireAuth, async (req, res) => {
+  const w = readBistWithdrawal(req.body);
+  if (!w) return res.status(400).json({ error: 'Tarih, hisse ve adet gerekli' });
+  try {
+    const id = Number(req.params.id);
+    const existing = await db.query(
+      `SELECT id FROM purchases WHERE id=$1 AND user_id=$2 AND kind='withdraw'`,
+      [id, req.session.userId]
+    );
+    if (!existing.rows.length) return res.status(404).json({ error: 'Kayit bulunamadi' });
+    // Bu satis hic olmasaydi mevcut bakiye/ortalama maliyet ne olurdu?
+    const { qty: available, avgCost } = await portfolio.currentTotals(req.session.userId, w.symbol, id);
+    if (w.qty > available + 1e-6) {
+      return res.status(400).json({ error: `Yetersiz bakiye: elinizde ${available} ${w.symbol} var` });
+    }
+    const total = -Math.round(w.qty * avgCost * 10000) / 10000;
+    const r = await db.query(
+      `UPDATE purchases SET trade_date=$1, symbol=$2, quantity=$3, price=$4, total=$5
+        WHERE id=$6 AND user_id=$7 AND kind='withdraw' RETURNING *`,
+      [w.trade_date, w.symbol, -w.qty, avgCost, total, id, req.session.userId]
+    );
     res.json(r.rows[0]);
   } catch (err) {
     console.error(err);

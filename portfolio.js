@@ -62,6 +62,32 @@ async function currentPortfolio(userId) {
     .filter((h) => h.quantity > 0 || h.costBasis !== 0);
 }
 
+// Bir hissenin SU ANKI toplam adedi+maliyeti (butun alim+cekim satirlari dahil,
+// temettu dususu dahil). excludeId verilirse o satir disarida tutulur (cekim
+// DUZENLEME'de "bu cekim hic olmasaydi ortalama maliyet ne olurdu" sorusunun
+// cevabi icin kullanilir).
+async function currentTotals(userId, symbol, excludeId) {
+  const sym = symbol.trim().toUpperCase();
+  const buy = excludeId
+    ? await db.query(
+        `SELECT COALESCE(SUM(quantity),0) qty, COALESCE(SUM(total),0) cost
+           FROM purchases WHERE user_id=$1 AND symbol=$2 AND id<>$3`,
+        [userId, sym, excludeId]
+      )
+    : await db.query(
+        `SELECT COALESCE(SUM(quantity),0) qty, COALESCE(SUM(total),0) cost
+           FROM purchases WHERE user_id=$1 AND symbol=$2`,
+        [userId, sym]
+      );
+  const div = await db.query(
+    `SELECT COALESCE(SUM(amount),0) v FROM cash_movements WHERE user_id=$1 AND symbol=$2 AND kind='dividend'`,
+    [userId, sym]
+  );
+  const qty = Number(buy.rows[0].qty);
+  const costBasis = Number(buy.rows[0].cost) - Number(div.rows[0].v);
+  return { qty, costBasis, avgCost: qty > 0 ? costBasis / qty : 0 };
+}
+
 // Nakit bakiye = tum nakit/temettu girisleri - tum alim toplamlari
 async function cashBalance(userId) {
   const inRes = await db.query(
@@ -471,6 +497,7 @@ async function priceOnDate(symbol, date) {
 module.exports = {
   holdingsBeforeDate,
   currentPortfolio,
+  currentTotals,
   cashBalance,
   summary,
   dividendStats,

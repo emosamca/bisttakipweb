@@ -384,6 +384,78 @@ $('purchaseForm').addEventListener('submit', async (e) => {
   }
 });
 
+// ---- Çekim (satış) modalı ----
+// Çekim miktarı güncel ortalama maliyetle TL'ye çevrilip o oranda maliyetten
+// düşülür (sunucu tarafında); komisyon alınmaz. Hisse secimi, zaten sahip
+// olunan hisselerle sinirli (serbest metin degil).
+function populateWithdrawSymbols(selected) {
+  const sel = $('wSymbol');
+  const symbols = Object.keys(holdingsByCode).filter((s) => holdingsByCode[s].quantity > 0);
+  sel.innerHTML = symbols.length
+    ? symbols.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('')
+    : '<option value="">(hisse yok)</option>';
+  if (selected && symbols.includes(selected)) sel.value = selected;
+}
+
+function updateWithdrawInfo() {
+  const sym = $('wSymbol').value;
+  const box = $('wBalanceInfo');
+  const h = holdingsByCode[sym];
+  const editId = $('wId').value;
+  // Duzenlenen cekim, kendi tuttugu miktari bakiyeye geri eklemis gibi gosterilir
+  const editOldQty = editId ? Number((purchaseCache.find((x) => x.id == editId) || {}).quantity || 0) : 0;
+  const available = (h ? h.quantity : 0) - editOldQty; // editOldQty negatif, cikarma geri ekler
+  if (!h || available <= 0) {
+    box.classList.remove('has-data');
+    box.innerHTML = sym ? `<strong>${esc(sym)}</strong> — çekilebilir bakiye yok.` : 'Çekilebilecek hisse yok.';
+    return;
+  }
+  box.classList.add('has-data');
+  box.innerHTML = `<strong>${esc(sym)}</strong> — mevcut bakiye: <strong>${num(available)}</strong>, ort. maliyet <strong>${tl(h.avgCost)}</strong>`;
+}
+
+function openWithdrawModal(row) {
+  $('withdrawForm').reset();
+  $('wError').classList.add('hidden');
+  if (row) {
+    $('withdrawTitle').textContent = 'Çekim (Satış) Düzenle';
+    $('wId').value = row.id;
+    $('wDate').value = row.trade_date.slice(0, 10);
+    populateWithdrawSymbols(row.symbol);
+    $('wQty').value = Math.abs(row.quantity);
+  } else {
+    $('withdrawTitle').textContent = 'Çekim (Satış) Ekle';
+    $('wId').value = '';
+    $('wDate').value = todayStr();
+    populateWithdrawSymbols();
+  }
+  updateWithdrawInfo();
+  openModal('withdrawModal');
+  focusDate('wDate');
+}
+$('openWithdraw').addEventListener('click', () => openWithdrawModal(null));
+$('wSymbol').addEventListener('change', updateWithdrawInfo);
+
+$('withdrawForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = $('wError');
+  err.classList.add('hidden');
+  const id = $('wId').value;
+  const body = JSON.stringify({
+    trade_date: $('wDate').value,
+    symbol: $('wSymbol').value,
+    quantity: $('wQty').value,
+  });
+  try {
+    await api(id ? `/api/purchases/withdrawals/${id}` : '/api/purchases/withdrawals', { method: id ? 'PUT' : 'POST', body });
+    closeModal('withdrawModal');
+    refreshAll();
+  } catch (e2) {
+    err.textContent = e2.message;
+    err.classList.remove('hidden');
+  }
+});
+
 // ---- Bedelsiz Pay Ekle ----
 function openBonusModal() {
   $('bonusForm').reset();
@@ -1246,8 +1318,13 @@ async function loadDividendStats() {
 }
 
 let currentCash = 0;
+// Hisse bazinda { quantity, avgCost } — Çekim modalinde bakiye onizlemesi icin
+let holdingsByCode = {};
+
 async function loadSummary() {
   const s = await api('/api/summary');
+  holdingsByCode = {};
+  s.holdings.forEach((h) => (holdingsByCode[h.symbol] = { quantity: h.quantity, avgCost: h.avgCost }));
   currentCash = s.cash;
   $('cardCash').textContent = tl(s.cash);
   $('cardCash').className = 'card-value' + (s.cash < 0 ? ' neg' : '');
@@ -1344,7 +1421,7 @@ function renderPurchases() {
   const fSym = $('filterSymbol').value;
   const fSrc = $('filterSource').value;
   const rows = purchaseCache.filter(
-    (r) => (!fSym || r.symbol === fSym) && (!fSrc || r.source === fSrc)
+    (r) => (!fSym || r.symbol === fSym) && (!fSrc || (r.kind === 'withdraw' ? 'withdraw' : r.source) === fSrc)
   );
   const tb = $('purchasesTable').querySelector('tbody');
   if (!rows.length) {
@@ -1365,22 +1442,23 @@ function renderPurchases() {
   const pageRows = rows.slice((purchasePage - 1) * PAGE_SIZE, purchasePage * PAGE_SIZE);
   tb.innerHTML =
     pageRows
-      .map(
-        (r) => `<tr>
+      .map((r) => {
+        const isW = r.kind === 'withdraw';
+        return `<tr>
         <td>${r.trade_date.slice(0, 10)}</td>
         <td><strong>${r.symbol}</strong></td>
-        <td class="num">${num(r.quantity)}</td>
+        <td class="num${isW ? ' neg' : ''}">${isW ? '−' : ''}${num(Math.abs(r.quantity))}</td>
         <td class="num">${tl(r.price)}</td>
-        <td class="num">${tl(r.total)}</td>
+        <td class="num${isW ? ' neg' : ''}">${isW ? '−' : ''}${tl(Math.abs(r.total))}</td>
         <td class="num">${showFee(fee(r))}</td>
-        <td><span class="tag ${r.source}">${srcLabel(r.source)}</span></td>
+        <td><span class="tag ${isW ? 'withdraw' : r.source}">${isW ? 'Çekim' : srcLabel(r.source)}</span></td>
         <td class="num">${r.usd_rate ? num(r.usd_rate) : '—'}</td>
         <td><div class="row-actions">
           <button class="edit-btn" data-edit-p="${r.id}" title="Düzenle">✏️</button>
           <button class="del-btn" data-del-p="${r.id}" title="Sil">🗑</button>
         </div></td>
-      </tr>`
-      )
+      </tr>`;
+      })
       .join('') +
     `<tr class="total-row">
         <td colspan="2"><strong>Toplam (${rows.length} kayıt)</strong></td>
@@ -1391,7 +1469,11 @@ function renderPurchases() {
         <td colspan="3"></td>
       </tr>`;
   tb.querySelectorAll('[data-edit-p]').forEach((b) =>
-    b.addEventListener('click', () => openPurchaseModal(purchaseCache.find((x) => x.id == b.dataset.editP)))
+    b.addEventListener('click', () => {
+      const row = purchaseCache.find((x) => x.id == b.dataset.editP);
+      if (row.kind === 'withdraw') openWithdrawModal(row);
+      else openPurchaseModal(row);
+    })
   );
   tb.querySelectorAll('[data-del-p]').forEach((b) =>
     b.addEventListener('click', () => del('purchases', b.dataset.delP))
