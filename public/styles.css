@@ -232,6 +232,48 @@ input:focus, select:focus { border-color: var(--primary); }
 .div-month .m { font-size: 10px; color: var(--muted); display: block; }
 .div-month .v { font-size: 12px; font-weight: 600; }
 @media (max-width: 600px) { .div-months { grid-template-columns: repeat(4, 1fr); } }
+/* ---- Temettu geliri sekmesi ---- */
+#tmEstimated { margin-bottom: 20px; }
+.tm-bars { display: flex; flex-direction: column; gap: 8px; }
+.tm-bar-row { display: grid; grid-template-columns: 48px 1fr auto; align-items: center; gap: 10px; }
+.tm-bar-yr { font-weight: 600; }
+.tm-bar-track { display: flex; height: 18px; border-radius: 4px; background: var(--bg-elev); overflow: hidden; }
+.tm-bar-seg { height: 100%; }
+.tm-bar-val { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 90px; text-align: right; }
+.tm-years { display: flex; flex-direction: column; }
+.tm-year > summary { list-style: none; cursor: pointer; }
+.tm-year > summary::-webkit-details-marker { display: none; }
+.tm-year-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.tm-year-head .tm-yr { font-size: 20px; font-weight: 600; }
+.tm-year-head .tm-yr::before { content: '▸ '; color: var(--muted); }
+.tm-year[open] .tm-year-head .tm-yr::before { content: '▾ '; }
+.tm-yr-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
+.tm-yr-total { font-size: 18px; font-weight: 600; color: var(--green); }
+.tm-yr-avg { font-size: 12px; color: var(--muted); }
+.tm-yr-avg strong { color: var(--text); }
+.tm-year[open] .tm-year-head { margin-bottom: 14px; }
+.tm-sub-h { margin: 18px 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.tm-months { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.tm-month { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tm-month.zero { opacity: .4; }
+.tm-month-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.tm-month-head .m { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.tm-month-head .v { font-size: 15px; font-weight: 600; color: var(--green); font-variant-numeric: tabular-nums; }
+.tm-month.zero .tm-month-head .v { color: var(--muted); }
+.tm-month-empty { font-size: 11px; color: var(--muted); }
+.tm-month-split { font-size: 11px; color: var(--muted); }
+.tm-month-syms { display: flex; flex-direction: column; gap: 3px; border-top: 1px solid var(--border); padding-top: 6px; }
+.tm-sym { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; }
+.tm-sym .sym { font-weight: 600; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tm-sym .sym i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.tm-sym .amt { text-align: right; font-variant-numeric: tabular-nums; }
+.tm-sym .usd { display: block; font-size: 10px; color: var(--muted); }
+.tm-mini { height: 3px; background: var(--bg-elev); border-radius: 2px; }
+.tm-mini > div { height: 100%; background: var(--green); border-radius: 2px; }
+@media (max-width: 1100px) { .tm-months { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 760px) { .tm-months { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 600px) { .tm-yr-meta { align-items: flex-start; text-align: left; } }
+
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @media (max-width: 1000px) { .two-col { grid-template-columns: 1fr; } }
 

@@ -450,6 +450,16 @@ app.get('/api/dividend-stats', requireAuth, async (req, res) => {
   }
 });
 
+// ---- Temettu geliri sekmesi (BIST + ABD, ABD tutarlari o gunku kurla TL) ----
+app.get('/api/dividend-income', requireAuth, async (req, res) => {
+  try {
+    res.json(await portfolio.dividendIncome(req.session.userId));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Temettu geliri alinamadi' });
+  }
+});
+
 // ---- Alim oncesi durum (Alim Ekle formunda gosterilir) ----
 app.get('/api/holdings-before', requireAuth, async (req, res) => {
   const { symbol, date } = req.query;

@@ -1923,6 +1923,7 @@ function switchDash(which) {
   const isBist = which === 'bist';
   const isFund = which === 'fund';
   const isUs = which === 'us';
+  const isTemettu = which === 'temettu';
   const isMetal = which === 'metal';
   const isCurrency = which === 'currency';
   const isCrypto = which === 'crypto';
@@ -1934,6 +1935,7 @@ function switchDash(which) {
   $('bistDash').classList.toggle('hidden', !isBist);
   $('fundDash').classList.toggle('hidden', !isFund);
   $('usDash').classList.toggle('hidden', !isUs);
+  $('temettuDash').classList.toggle('hidden', !isTemettu);
   $('metalDash').classList.toggle('hidden', !isMetal);
   $('currencyDash').classList.toggle('hidden', !isCurrency);
   $('cryptoDash').classList.toggle('hidden', !isCrypto);
@@ -1941,7 +1943,7 @@ function switchDash(which) {
   $('binanceDash').classList.toggle('hidden', !isBinance);
   $('achvDash').classList.toggle('hidden', !isAchv);
   // Her sekme kendi menusunu gosterir; Genel'de Nakit Duzenleme menusu gosterilir.
-  // Binance ve Basarimlar sekmesinde menu yoktur (yalnizca Kullanicilar + Parola Degistir).
+  // Binance, Temettu ve Basarimlar sekmesinde menu yoktur (yalnizca Kullanicilar + Parola Degistir).
   $('genelMenu').classList.toggle('hidden', !isGenel);
   $('bistMenu').classList.toggle('hidden', !isBist);
   $('fundMenu').classList.toggle('hidden', !isFund);
@@ -1955,6 +1957,7 @@ function switchDash(which) {
   $('tabBist').classList.toggle('active', isBist);
   $('tabFund').classList.toggle('active', isFund);
   $('tabUs').classList.toggle('active', isUs);
+  $('tabTemettu').classList.toggle('active', isTemettu);
   $('tabMetal').classList.toggle('active', isMetal);
   $('tabCurrency').classList.toggle('active', isCurrency);
   $('tabCrypto').classList.toggle('active', isCrypto);
@@ -1963,6 +1966,7 @@ function switchDash(which) {
   $('tabAchv').classList.toggle('active', isAchv);
   if (isFund) fundLoad();
   if (isUs) usRefreshAll();
+  if (isTemettu) temettuLoad();
   if (isMetal) metalRefreshAll();
   if (isCurrency) currencyRefreshAll();
   if (isCrypto) cryptoRefreshAll();
@@ -1977,6 +1981,7 @@ $('tabGenelPct').addEventListener('click', () => switchDash('genelpct'));
 $('tabBist').addEventListener('click', () => switchDash('bist'));
 $('tabFund').addEventListener('click', () => switchDash('fund'));
 $('tabUs').addEventListener('click', () => switchDash('us'));
+$('tabTemettu').addEventListener('click', () => switchDash('temettu'));
 $('tabMetal').addEventListener('click', () => switchDash('metal'));
 $('tabCurrency').addEventListener('click', () => switchDash('currency'));
 $('tabCrypto').addEventListener('click', () => switchDash('crypto'));
@@ -2082,7 +2087,168 @@ async function genelLoadSummary() {
   );
 
   genelLoadChart(liveTotals);
+  genelLoadDividend();
 }
+
+// Genel'deki "Toplam Alinan Temettu" karti. Yalniz bilgi amaclidir: Toplam
+// Butce'ye, pastaya, sparkline'lara ve zaman grafiklerine BILEREK eklenmez
+// (temettu zaten nakit/maliyet uzerinden varlik degerlerine yansimis durumda).
+async function genelLoadDividend() {
+  try {
+    const d = await api('/api/dividend-income');
+    $('genDividend').textContent = tl(d.total);
+    const cur = d.years.find((y) => y.year === d.currentYear);
+    $('genDividendSub').textContent = cur ? `${d.currentYear}: ${tl(cur.total)} · aylık ort. ${tl(cur.avg12)}` : '';
+  } catch {
+    $('genDividend').textContent = '—';
+    $('genDividendSub').textContent = '';
+  }
+}
+
+// ===================== TEMETTU GELIRI =====================
+// BIST (TL) + ABD (temettu tarihindeki kurla TL) temettuleri; yil yil, ay ay,
+// hisse hisse dokum. Aylik ortalama = yil toplami / 12 (icinde bulunulan yil
+// icin ayrica "gecen aylara gore" ortalama da gosterilir).
+const TM_COLORS = { BIST: '#2f81f7', ABD: '#3fb950' };
+
+function tmChange(cur, prev) {
+  if (!(prev > 0)) return '';
+  const pct = ((cur - prev) / prev) * 100;
+  const up = pct >= 0;
+  return `<span class="${up ? 'pos' : 'neg'}">${up ? '▲' : '▼'} %${Math.abs(pct).toFixed(1)}</span>`;
+}
+
+// Ay kutusundaki tek hisse satiri: renkli nokta (BIST/ABD) + kod | TL tutar ($ tutar)
+function tmSymLine(s) {
+  const usdTxt = s.market === 'ABD' ? `<span class="usd">${usd(s.usd)}</span>` : '';
+  const est = s.estimated ? '<span class="muted" title="O tarihe kur bulunamadı; güncel kur kullanıldı">*</span>' : '';
+  return `<div class="tm-sym" title="${s.market}${s.count > 1 ? ` · ${s.count} ödeme` : ''}">
+    <span class="sym"><i style="background:${TM_COLORS[s.market]}"></i>${esc(s.symbol)}</span>
+    <span class="amt">${tl(s.amount)}${est}${usdTxt}</span>
+  </div>`;
+}
+
+async function temettuLoad() {
+  let d;
+  try {
+    d = await api('/api/dividend-income');
+  } catch (e) {
+    $('tmYears').innerHTML = `<div class="error">${esc(e.message)}</div>`;
+    return;
+  }
+  const cur = d.years.find((y) => y.year === d.currentYear);
+
+  $('tmTotal').textContent = tl(d.total);
+  $('tmTotalSub').textContent = d.count ? `${d.count} ödeme · ${d.firstDate.slice(0, 4)}'ten beri` : 'Kayıt yok';
+  $('tmBist').textContent = tl(d.totalBist);
+  $('tmBistSub').textContent = d.total > 0 ? `%${((d.totalBist / d.total) * 100).toFixed(1)} pay` : '';
+  $('tmUs').textContent = tl(d.totalUs);
+  $('tmUsSub').textContent = d.totalUsUsd > 0 ? `${usd(d.totalUsUsd)} · %${((d.totalUs / d.total) * 100).toFixed(1)} pay` : '';
+  $('tmYearLabel').textContent = `${d.currentYear} Yılı`;
+  $('tmYear').textContent = cur ? tl(cur.total) : tl(0);
+  $('tmYearSub').innerHTML = cur
+    ? `Aylık ort. ${tl(cur.avg12)} (÷12) ${tmChange(cur.total, cur.prevTotal)}`
+    : '';
+  $('tmLast12').textContent = tl(d.last12);
+  $('tmLast12Sub').textContent = `Aylık ort. ${tl(d.last12 / 12)}`;
+
+  const est = $('tmEstimated');
+  est.classList.toggle('hidden', !d.estimatedCount);
+  est.textContent = d.estimatedCount
+    ? `* ${d.estimatedCount} ABD temettüsü için o tarihe ait USD/TRY kuru bulunamadı; güncel kur kullanıldı.`
+    : '';
+
+  if (!d.years.length) {
+    $('tmYearsChart').innerHTML = '<div class="chart-empty">Temettü kaydı yok</div>';
+    $('tmYears').innerHTML = '';
+    return;
+  }
+
+  // Yillik toplamlar: BIST/ABD yigilmis yatay cubuklar
+  const maxYear = Math.max(...d.years.map((y) => y.total));
+  $('tmYearsChart').innerHTML =
+    `<div class="chart-legend">
+       <span class="cl-item"><span class="cl-line" style="background:${TM_COLORS.BIST}"></span>BIST</span>
+       <span class="cl-item"><span class="cl-line" style="background:${TM_COLORS.ABD}"></span>ABD</span>
+     </div>` +
+    d.years
+      .map((y) => {
+        const w = (v) => (maxYear > 0 ? (v / maxYear) * 100 : 0).toFixed(2);
+        return `<div class="tm-bar-row" title="BIST ${tl(y.bist)} · ABD ${tl(y.us)}">
+          <span class="tm-bar-yr">${y.year}</span>
+          <div class="tm-bar-track">
+            <div class="tm-bar-seg" style="width:${w(y.bist)}%;background:${TM_COLORS.BIST}"></div>
+            <div class="tm-bar-seg" style="width:${w(y.us)}%;background:${TM_COLORS.ABD}"></div>
+          </div>
+          <span class="tm-bar-val">${tl(y.total)}</span>
+        </div>`;
+      })
+      .join('');
+
+  $('tmYears').innerHTML = d.years
+    .map((y, idx) => {
+      const isCur = y.year === d.currentYear;
+      const maxMonth = Math.max(...y.months.map((m) => m.total));
+      // BIST sekmesindeki temettu kutulari gibi: her ay bir kutu, icinde hisse dokumu
+      const monthBoxes = y.months
+        .map((m, i) => {
+          const future = isCur && i + 1 > y.monthsElapsed;
+          if (!m.total) {
+            return `<div class="tm-month zero">
+              <div class="tm-month-head"><span class="m">${MONTHS_TR[i]}</span><span class="v">—</span></div>
+              <div class="tm-month-empty">${future ? 'henüz gelmedi' : 'temettü yok'}</div>
+            </div>`;
+          }
+          const barW = maxMonth > 0 ? (m.total / maxMonth) * 100 : 0;
+          const split = [m.bist ? `BIST ${tl(m.bist)}` : '', m.us ? `ABD ${tl(m.us)}` : ''].filter(Boolean).join(' · ');
+          return `<div class="tm-month">
+            <div class="tm-month-head"><span class="m">${MONTHS_TR[i]}</span><span class="v">${tl(m.total)}</span></div>
+            <div class="tm-mini"><div style="width:${barW.toFixed(1)}%"></div></div>
+            <div class="tm-month-split">${split}</div>
+            <div class="tm-month-syms">${m.symbols.map(tmSymLine).join('')}</div>
+          </div>`;
+        })
+        .join('');
+
+      const symRows = y.bySymbol
+        .map(
+          (s) => `<tr>
+            <td><strong>${esc(s.symbol)}</strong></td>
+            <td><span class="tag ${s.market === 'ABD' ? 'dividend' : 'normal'}">${s.market}</span></td>
+            <td class="num">${s.count}</td>
+            <td class="num">${s.market === 'ABD' ? usd(s.usd) : '—'}</td>
+            <td class="num">${tl(s.amount)}</td>
+            <td class="num">%${s.share.toFixed(1)}</td>
+          </tr>`
+        )
+        .join('');
+
+      const avgLine = isCur && y.monthsElapsed < 12
+        ? `Aylık ort. <strong>${tl(y.avg12)}</strong> (÷12) · geçen ${y.monthsElapsed} aya göre <strong>${tl(y.avgElapsed)}</strong>`
+        : `Aylık ort. <strong>${tl(y.avg12)}</strong> (${tl(y.total)} ÷ 12)`;
+
+      return `<details class="panel tm-year" ${idx === 0 ? 'open' : ''}>
+        <summary class="tm-year-head">
+          <span class="tm-yr">${y.year}</span>
+          <span class="tm-yr-meta">
+            <span class="tm-yr-total">${tl(y.total)} ${tmChange(y.total, y.prevTotal)}</span>
+            <span class="tm-yr-avg">${avgLine}</span>
+            <span class="tm-yr-avg">BIST ${tl(y.bist)} · ABD ${tl(y.us)}${y.usUsd ? ` (${usd(y.usUsd)})` : ''} · ${y.count} ödeme · ${y.paidMonths} ayda</span>
+          </span>
+        </summary>
+        <div class="tm-months">${monthBoxes}</div>
+        <h4 class="tm-sub-h">Hisse Bazında ${y.year}</h4>
+        <div class="table-wrap">
+          <table class="compact">
+            <thead><tr><th>Hisse</th><th>Piyasa</th><th class="num">Ödeme</th><th class="num">USD</th><th class="num">Tutar (₺)</th><th class="num">Pay</th></tr></thead>
+            <tbody>${symRows}</tbody>
+          </table>
+        </div>
+      </details>`;
+    })
+    .join('');
+}
+
 function maybeRefreshGenel() {
   if (!$('genelDash').classList.contains('hidden')) genelLoadSummary();
   if (!$('genelPctDash').classList.contains('hidden')) genelPctLoad();

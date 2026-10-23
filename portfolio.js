@@ -199,6 +199,137 @@ async function dividendStats(userId) {
   return Object.values(byYear).sort((a, b) => b.year - a.year);
 }
 
+// Temettu geliri sekmesi: BIST (TL) + ABD (USD -> TL) temettuleri tek listede.
+// ABD temettusu, temettu tarihindeki USD/TRY kuruyla TL'ye cevrilir
+// (usportfolio.rateOnDate). O tarihe kur bulunamazsa guncel kur kullanilir ve
+// satir estimated=true isaretlenir. Yil bazinda ay ay / hisse hisse dokum,
+// aylik ortalama (toplam / 12) ve gecen aya gore ortalama da hesaplanir.
+async function dividendIncome(userId) {
+  const usportfolio = require('./usportfolio');
+  const [bist, us] = await Promise.all([
+    db.query(
+      `SELECT move_date, symbol, amount FROM cash_movements
+        WHERE user_id=$1 AND kind='dividend' ORDER BY move_date, id`,
+      [userId]
+    ),
+    db.query(
+      `SELECT move_date, symbol, amount FROM us_cash_movements
+        WHERE user_id=$1 AND kind='dividend' ORDER BY move_date, id`,
+      [userId]
+    ),
+  ]);
+  const dstr = (d) => (d instanceof Date ? localDate(d) : String(d).slice(0, 10));
+
+  const items = bist.rows.map((r) => ({
+    date: dstr(r.move_date), market: 'BIST', symbol: r.symbol || '—',
+    amount: Number(r.amount), usd: null, rate: null, estimated: false,
+  }));
+
+  // Ayni gune ait birden cok ABD temettusu icin kur bir kez sorgulanir
+  const rateCache = {};
+  let fallbackRate;
+  for (const r of us.rows) {
+    const date = dstr(r.move_date);
+    if (!(date in rateCache)) rateCache[date] = (await usportfolio.rateOnDate(date)).rate;
+    let rate = rateCache[date];
+    let estimated = false;
+    if (!(rate > 0)) {
+      if (fallbackRate === undefined) fallbackRate = await usportfolio.currentRate();
+      rate = fallbackRate || 0;
+      estimated = true;
+    }
+    const usd = Number(r.amount);
+    items.push({ date, market: 'ABD', symbol: r.symbol || '—', amount: usd * rate, usd, rate, estimated });
+  }
+  items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  const today = localDate(new Date());
+  const curYear = Number(today.slice(0, 4));
+  const curMonth = Number(today.slice(5, 7));
+  const d12 = new Date();
+  d12.setFullYear(d12.getFullYear() - 1);
+  const last12From = localDate(d12);
+
+  const byYear = {};
+  let total = 0, totalBist = 0, totalUs = 0, totalUsUsd = 0, last12 = 0;
+  for (const it of items) {
+    const yr = Number(it.date.slice(0, 4));
+    const mo = Number(it.date.slice(5, 7)) - 1;
+    if (!byYear[yr]) {
+      byYear[yr] = {
+        year: yr, total: 0, bist: 0, us: 0, usUsd: 0, count: 0,
+        months: Array.from({ length: 12 }, () => ({ total: 0, bist: 0, us: 0, symbols: {} })),
+        symbols: {},
+      };
+    }
+    const y = byYear[yr];
+    const m = y.months[mo];
+    const key = `${it.market}:${it.symbol}`;
+    const add = (bucket) => {
+      if (!bucket[key]) bucket[key] = { symbol: it.symbol, market: it.market, amount: 0, usd: 0, count: 0, estimated: false };
+      bucket[key].amount += it.amount;
+      if (it.usd != null) bucket[key].usd += it.usd;
+      bucket[key].count++;
+      if (it.estimated) bucket[key].estimated = true;
+    };
+    add(m.symbols);
+    add(y.symbols);
+    m.total += it.amount;
+    y.total += it.amount;
+    y.count++;
+    if (it.market === 'ABD') {
+      m.us += it.amount; y.us += it.amount; y.usUsd += it.usd;
+      totalUs += it.amount; totalUsUsd += it.usd;
+    } else {
+      m.bist += it.amount; y.bist += it.amount; totalBist += it.amount;
+    }
+    total += it.amount;
+    if (it.date > last12From && it.date <= today) last12 += it.amount;
+  }
+
+  const sortSyms = (obj, base) =>
+    Object.values(obj)
+      .sort((a, b) => b.amount - a.amount)
+      .map((s) => ({ ...s, share: base > 0 ? (s.amount / base) * 100 : 0 }));
+
+  const years = Object.values(byYear)
+    .sort((a, b) => b.year - a.year)
+    .map((y) => {
+      // Icinde bulunulan yil icin "gecen ay" sayisi (bu ay dahil); gecmis yillar 12
+      const monthsElapsed = y.year === curYear ? curMonth : 12;
+      const prev = byYear[y.year - 1];
+      return {
+        year: y.year,
+        total: y.total,
+        bist: y.bist,
+        us: y.us,
+        usUsd: y.usUsd,
+        count: y.count,
+        avg12: y.total / 12,
+        monthsElapsed,
+        avgElapsed: y.total / monthsElapsed,
+        prevTotal: prev ? prev.total : null,
+        paidMonths: y.months.filter((m) => m.total > 0).length,
+        months: y.months.map((m) => ({ total: m.total, bist: m.bist, us: m.us, symbols: sortSyms(m.symbols, m.total) })),
+        bySymbol: sortSyms(y.symbols, y.total),
+      };
+    });
+
+  return {
+    total, totalBist, totalUs, totalUsUsd, last12,
+    count: items.length,
+    estimatedCount: items.filter((i) => i.estimated).length,
+    firstDate: items.length ? items[0].date : null,
+    currentYear: curYear,
+    years,
+  };
+}
+
+// Yerel tarih (YYYY-MM-DD); toISOString UTC'ye kaydirdigi icin kullanilmaz
+function localDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // Portfoyun zaman icindeki piyasa degeri (price_history.close ile).
 // Her tarihte: o tarihe kadar (<=) alinan adet * o gunku close, hisseler toplami.
 async function portfolioHistory(userId, fromDate = '2025-08-01') {
@@ -501,6 +632,7 @@ module.exports = {
   cashBalance,
   summary,
   dividendStats,
+  dividendIncome,
   portfolioHistory,
   priceOnDate,
   historySymbols,

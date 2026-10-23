@@ -84,6 +84,7 @@
         <button class="tab" id="tabBist">📊 BIST Dashboard</button>
         <button class="tab" id="tabFund">📈 BIST Fon</button>
         <button class="tab" id="tabUs">🇺🇸 ABD Dashboard</button>
+        <button class="tab" id="tabTemettu">💰 Temettü</button>
         <button class="tab" id="tabMetal">🥇 Kıymetli Maden</button>
         <button class="tab" id="tabCurrency">💱 Döviz</button>
         <button class="tab" id="tabCrypto">🪙 Kripto</button>
@@ -140,6 +141,12 @@
           <div class="card-value" id="genBinance">—</div>
           <div class="card-sub" id="genBinanceAt"></div>
           <div class="card-spark" id="spkBinance"></div>
+        </div>
+        <!-- Bilgi karti: Toplam Butce'ye, pastaya ve grafiklere DAHIL EDILMEZ -->
+        <div class="card clickable" data-goto="temettu" title="Temettü sekmesine git">
+          <div class="card-label">Toplam Alınan Temettü (TL)</div>
+          <div class="card-value pos" id="genDividend">—</div>
+          <div class="card-sub" id="genDividendSub"></div>
         </div>
         <div class="card highlight">
           <div class="card-label">Toplam Bütçe</div>
@@ -595,6 +602,46 @@
           <div class="pager" id="usPurchasesPager"></div>
         </section>
       </div><!-- /usDash -->
+
+      <!-- ===================== TEMETTU GELIRI ===================== -->
+      <div id="temettuDash" class="hidden">
+        <section class="cards">
+          <div class="card highlight">
+            <div class="card-label">Toplam Alınan Temettü (TL)</div>
+            <div class="card-value" id="tmTotal">—</div>
+            <div class="card-sub" id="tmTotalSub"></div>
+          </div>
+          <div class="card">
+            <div class="card-label">BIST Temettü (TL)</div>
+            <div class="card-value" id="tmBist">—</div>
+            <div class="card-sub" id="tmBistSub"></div>
+          </div>
+          <div class="card">
+            <div class="card-label">ABD Temettü (TL)</div>
+            <div class="card-value" id="tmUs">—</div>
+            <div class="card-sub" id="tmUsSub"></div>
+          </div>
+          <div class="card">
+            <div class="card-label" id="tmYearLabel">Bu Yıl</div>
+            <div class="card-value" id="tmYear">—</div>
+            <div class="card-sub" id="tmYearSub"></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Son 12 Ay</div>
+            <div class="card-value" id="tmLast12">—</div>
+            <div class="card-sub" id="tmLast12Sub"></div>
+          </div>
+        </section>
+
+        <div class="info-box hidden" id="tmEstimated"></div>
+
+        <section class="panel">
+          <h3>Yıllık Temettü Geliri</h3>
+          <div id="tmYearsChart" class="tm-bars"><div class="chart-empty">Yükleniyor…</div></div>
+        </section>
+
+        <div id="tmYears" class="tm-years"></div>
+      </div><!-- /temettuDash -->
 
       <!-- ===================== KIYMETLI MADEN DASHBOARD ===================== -->
       <div id="metalDash" class="hidden">
