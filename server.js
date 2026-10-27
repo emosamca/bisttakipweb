@@ -1,5 +1,8 @@
 require('dotenv').config();
 
+const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
@@ -23,6 +26,51 @@ const fundsportfolio = require('./fundsportfolio');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
+
+// HTTPS sertifikasi: .pfx (HTTPS_PFX) veya .pem cifti (HTTPS_CERT + HTTPS_KEY).
+// Hicbiri tanimli degilse null doner ve yalnizca HTTP calisir.
+function httpsOptions() {
+  const { HTTPS_PFX, HTTPS_PFX_PASSPHRASE, HTTPS_CERT, HTTPS_KEY, HTTPS_CA } = process.env;
+  if (HTTPS_PFX) {
+    return { pfx: fs.readFileSync(HTTPS_PFX), passphrase: HTTPS_PFX_PASSPHRASE || undefined };
+  }
+  if (HTTPS_CERT && HTTPS_KEY) {
+    const opts = { cert: fs.readFileSync(HTTPS_CERT), key: fs.readFileSync(HTTPS_KEY) };
+    if (HTTPS_CA) opts.ca = fs.readFileSync(HTTPS_CA); // ara sertifika zinciri
+    return opts;
+  }
+  return null;
+}
+
+// HTTP her zaman; sertifika varsa ayni uygulama HTTPS'te de sunulur.
+// HTTPS acilamazsa (sertifika hatali, port dolu) HTTP calismaya devam eder.
+function startServers() {
+  http.createServer(app).listen(PORT, () => console.log(`Sunucu calisiyor: http://localhost:${PORT}`));
+  let opts;
+  try {
+    opts = httpsOptions();
+  } catch (err) {
+    console.error('HTTPS sertifikasi okunamadi, yalnizca HTTP calisiyor:', err.message);
+    return;
+  }
+  if (!opts) {
+    console.log('HTTPS KAPALI (sertifika tanimli degil: HTTPS_PFX veya HTTPS_CERT + HTTPS_KEY)');
+    return;
+  }
+  let server;
+  try {
+    server = https.createServer(opts, app); // hatali sifre/anahtar burada hata verir
+  } catch (err) {
+    console.error('HTTPS sertifikasi gecersiz, yalnizca HTTP calisiyor:', err.message);
+    return;
+  }
+  server.on('error', (err) => {
+    const sebep = err.code === 'EADDRINUSE' ? `${HTTPS_PORT} portu baska bir uygulamada` : err.message;
+    console.error(`HTTPS baslatilamadi, yalnizca HTTP calisiyor: ${sebep}`);
+  });
+  server.listen(HTTPS_PORT, () => console.log(`Sunucu calisiyor: https://localhost:${HTTPS_PORT}`));
+}
 
 if (!process.env.SESSION_SECRET) {
   console.error('SESSION_SECRET tanimli degil. .env dosyasina uzun, rastgele bir deger ekleyin.');
@@ -3188,7 +3236,7 @@ async function ensureDefaultUser() {
     setInterval(dailyTick, 60 * 1000);
     const gunler = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
     console.log(`Telegram bot ${telegram.configured() ? 'aktif' : 'KAPALI (BOT_TOKEN yok)'}; gunluk ozet ${SUMMARY_HOUR}:00, haftalik ozet ${gunler[WEEKLY_DAY]} ${SUMMARY_HOUR}:00`);
-    app.listen(PORT, () => console.log(`Sunucu calisiyor: http://localhost:${PORT}`));
+    startServers();
   } catch (err) {
     console.error('Baslangic hatasi:', err);
     process.exit(1);

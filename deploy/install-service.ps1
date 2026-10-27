@@ -10,7 +10,8 @@ param(
   [string]$ServiceName = "BistTakip",
   [string]$AppDir      = "$PSScriptRoot\..",
   [string]$NodeExe     = "C:\Program Files\nodejs\node.exe",
-  [int]   $Port        = 3000
+  [int]   $Port        = 3000,
+  [int]   $HttpsPort   = 3443  # sertifika .env'de tanimliysa kullanilir
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,7 +21,7 @@ $server = Join-Path $AppDir "server.js"
 Write-Host "Servis adi : $ServiceName"
 Write-Host "Uygulama   : $server"
 Write-Host "Node       : $NodeExe"
-Write-Host "Port       : $Port"
+Write-Host "Port       : $Port (HTTPS: $HttpsPort)"
 
 # nssm bulunuyor mu?
 $nssm = (Get-Command nssm -ErrorAction SilentlyContinue).Source
@@ -59,16 +60,19 @@ if ($existing) {
 & $nssm set $ServiceName AppRotateFiles 1
 & $nssm set $ServiceName AppRotateBytes 5242880
 & $nssm set $ServiceName Start SERVICE_AUTO_START
-& $nssm set $ServiceName AppEnvironmentExtra "PORT=$Port"
+& $nssm set $ServiceName AppEnvironmentExtra "PORT=$Port" "HTTPS_PORT=$HttpsPort"
 & $nssm set $ServiceName DisplayName "BIST Portfoy Takip"
 & $nssm set $ServiceName Description "BIST hisse portfoy takip web uygulamasi"
 
 # Firewall (gelen baglanti) kurali
-if (-not (Get-NetFirewallRule -DisplayName "BIST Takip $Port" -ErrorAction SilentlyContinue)) {
-  New-NetFirewallRule -DisplayName "BIST Takip $Port" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port | Out-Null
-  Write-Host "Firewall kurali eklendi (TCP $Port)."
+foreach ($p in @($Port, $HttpsPort)) {
+  if (-not (Get-NetFirewallRule -DisplayName "BIST Takip $p" -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -DisplayName "BIST Takip $p" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $p | Out-Null
+    Write-Host "Firewall kurali eklendi (TCP $p)."
+  }
 }
 
 & $nssm start $ServiceName
 Write-Host "`nKurulum tamam. Test: http://$(hostname):$Port  veya  http://<sunucu-ip>:$Port"
+Write-Host "HTTPS (sertifika .env'de tanimliysa): https://$(hostname):$HttpsPort"
 Write-Host "Loglar: $logDir"

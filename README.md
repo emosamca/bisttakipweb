@@ -39,11 +39,31 @@ DEFAULT_PASSWORD=
 > (` / `). Giriş yaptıktan sonra `.env`'deki şifreyi değiştirip
 > yeni kullanıcı oluşturmanız önerilir.
 
+### HTTPS (HTTP ile aynı anda)
+
+Sertifika tanımlanırsa uygulama `PORT` (HTTP) ile birlikte `HTTPS_PORT`'ta
+(varsayılan 3443) HTTPS de sunar. Sertifikalar `C:\certs` klasöründedir:
+
+```
+HTTPS_PORT=3443
+HTTPS_CERT=C:\certs\origin.cert   # sertifika
+HTTPS_KEY=C:\certs\origin.pem     # özel anahtar
+HTTPS_CA=C:\certs\chain.pem       # isteğe bağlı ara sertifika zinciri
+# veya tek .pfx dosyası
+HTTPS_PFX=C:\certs\site.pfx
+HTTPS_PFX_PASSPHRASE=...
+```
+
+Sertifika tanımlı değilse, okunamazsa ya da port doluysa hata loglanır ve
+uygulama yalnızca HTTP ile çalışmaya devam eder.
+
 ## Kurulum (Docker)
 
 ```bash
 docker build -t bist-takip .
 docker run -d -p 3000:3000 --env-file .env --name bist-takip bist-takip
+# HTTPS ile (sertifika klasörünü bağlayın, .env'de HTTPS_CERT=/certs/origin.cert vb.)
+docker run -d -p 3000:3000 -p 3443:3443 -v C:/certs:/certs:ro --env-file .env --name bist-takip bist-takip
 ```
 
 ## Sunucuda kalıcı çalıştırma (systemd örneği)
