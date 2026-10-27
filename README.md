@@ -57,6 +57,9 @@ HTTPS_PFX_PASSPHRASE=...
 Sertifika tanımlı değilse, okunamazsa ya da port doluysa hata loglanır ve
 uygulama yalnızca HTTP ile çalışmaya devam eder.
 
+Portları yalnızca Cloudflare'e açmak için (yönetici PowerShell):
+`.\deploy\cloudflare-firewall.ps1`. Kurulum scripti bunu otomatik çalıştırır.
+
 ## Kurulum (Docker)
 
 ```bash

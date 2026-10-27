@@ -64,15 +64,10 @@ if ($existing) {
 & $nssm set $ServiceName DisplayName "BIST Portfoy Takip"
 & $nssm set $ServiceName Description "BIST hisse portfoy takip web uygulamasi"
 
-# Firewall (gelen baglanti) kurali
-foreach ($p in @($Port, $HttpsPort)) {
-  if (-not (Get-NetFirewallRule -DisplayName "BIST Takip $p" -ErrorAction SilentlyContinue)) {
-    New-NetFirewallRule -DisplayName "BIST Takip $p" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $p | Out-Null
-    Write-Host "Firewall kurali eklendi (TCP $p)."
-  }
-}
+# Firewall (gelen baglanti) kurali: portlar yalnizca Cloudflare IP'lerine acilir
+& (Join-Path $PSScriptRoot "cloudflare-firewall.ps1") -Ports $Port, $HttpsPort
 
 & $nssm start $ServiceName
-Write-Host "`nKurulum tamam. Test: http://$(hostname):$Port  veya  http://<sunucu-ip>:$Port"
-Write-Host "HTTPS (sertifika .env'de tanimliysa): https://$(hostname):$HttpsPort"
+Write-Host "`nKurulum tamam. Sunucunun kendisinden test: http://localhost:$Port  /  https://localhost:$HttpsPort"
+Write-Host "Disaridan yalnizca Cloudflare uzerinden (alan adiyla) erisilir."
 Write-Host "Loglar: $logDir"
