@@ -162,6 +162,7 @@ $('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const err = $('loginError');
   err.classList.add('hidden');
+  $('loginNotice').classList.add('hidden');
   try {
     const data = await api('/api/login', {
       method: 'POST',
@@ -171,6 +172,87 @@ $('loginForm').addEventListener('submit', async (e) => {
   } catch (e2) {
     err.textContent = e2.message;
     err.classList.remove('hidden');
+  }
+});
+
+// ---- Sifremi unuttum ----
+const showMsg = (id, text) => {
+  $(id).textContent = text;
+  $(id).classList.toggle('hidden', !text);
+};
+function showForgot() {
+  $('forgotForm').reset();
+  $('fgUser').value = $('loginUser').value.trim();
+  $('fgUser').readOnly = false;
+  $('fgStep2').classList.add('hidden');
+  $('fgResend').classList.add('hidden');
+  ['fgCode', 'fgPass', 'fgPass2'].forEach((id) => ($(id).required = false));
+  $('fgSubmit').textContent = 'Kod Gönder';
+  showMsg('fgNotice', '');
+  showMsg('fgError', '');
+  $('loginForm').classList.add('hidden');
+  $('forgotForm').classList.remove('hidden');
+  $('fgUser').focus();
+}
+function backToLogin(notice) {
+  $('forgotForm').classList.add('hidden');
+  $('loginForm').classList.remove('hidden');
+  showMsg('loginError', '');
+  showMsg('loginNotice', notice || '');
+}
+async function sendResetCode() {
+  const data = await api('/api/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ username: $('fgUser').value.trim() }),
+  });
+  $('fgUser').readOnly = true;
+  $('fgStep2').classList.remove('hidden');
+  $('fgResend').classList.remove('hidden');
+  ['fgCode', 'fgPass', 'fgPass2'].forEach((id) => ($(id).required = true));
+  $('fgSubmit').textContent = 'Şifreyi Değiştir';
+  showMsg('fgNotice', data.message || 'Kod gönderildi.');
+  $('fgCode').focus();
+}
+$('forgotLink').addEventListener('click', (e) => {
+  e.preventDefault();
+  showForgot();
+});
+$('fgBack').addEventListener('click', (e) => {
+  e.preventDefault();
+  backToLogin();
+});
+$('fgResend').addEventListener('click', async (e) => {
+  e.preventDefault();
+  showMsg('fgError', '');
+  try {
+    await sendResetCode();
+  } catch (e2) {
+    showMsg('fgError', e2.message);
+  }
+});
+$('forgotForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  showMsg('fgError', '');
+  try {
+    if ($('fgStep2').classList.contains('hidden')) {
+      await sendResetCode();
+      return;
+    }
+    if ($('fgPass').value !== $('fgPass2').value) throw new Error('Yeni şifreler eşleşmiyor');
+    await api('/api/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: $('fgUser').value.trim(),
+        code: $('fgCode').value.trim(),
+        newPassword: $('fgPass').value,
+      }),
+    });
+    $('loginUser').value = $('fgUser').value.trim();
+    $('loginPass').value = '';
+    backToLogin('Şifreniz değiştirildi, yeni şifrenizle giriş yapın.');
+    $('loginPass').focus();
+  } catch (e2) {
+    showMsg('fgError', e2.message);
   }
 });
 

@@ -66,6 +66,15 @@ CREATE TABLE IF NOT EXISTS password_history (
 );
 CREATE INDEX IF NOT EXISTS idx_pwhist_user ON password_history(user_id);
 
+-- Sifremi unuttum: Telegram'a gonderilen tek kullanimlik kod (kullanici basina tek aktif kod)
+CREATE TABLE IF NOT EXISTS password_resets (
+  user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  code_hash   TEXT NOT NULL,          -- bcrypt ile hash'lenmis 6 haneli kod
+  expires_at  TIMESTAMPTZ NOT NULL,   -- olusturma + 10 dk
+  attempts    INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Hisse alimlari
 -- Cekim (satis) satirlari NEGATIF quantity/total ile tutulur (kind='withdraw');
 -- bu sayede SUM(quantity)/SUM(total) tabanli ortalama maliyet hesabi hicbir ek

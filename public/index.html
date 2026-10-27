@@ -19,7 +19,34 @@
         <input type="password" id="loginPass" autocomplete="current-password" required />
       </label>
       <button type="submit" class="btn primary">Giriş Yap</button>
+      <div id="loginNotice" class="notice pos hidden"></div>
       <div id="loginError" class="error hidden"></div>
+      <a href="#" id="forgotLink" class="login-link">Şifremi unuttum</a>
+    </form>
+
+    <!-- Sifremi unuttum: 1) kullanici adi -> Telegram'a kod  2) kod + yeni sifre -->
+    <form id="forgotForm" class="login-card hidden">
+      <h1>🔐 Şifre Sıfırlama</h1>
+      <p class="muted" id="fgIntro">Kullanıcı adınızı girin; kayıtlı Telegram hesabınıza bir kod gönderilecek.</p>
+      <label>Kullanıcı Adı
+        <input type="text" id="fgUser" autocomplete="username" required />
+      </label>
+      <div id="fgStep2" class="hidden">
+        <label>Kod
+          <input type="text" id="fgCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
+        </label>
+        <label>Yeni Şifre
+          <input type="password" id="fgPass" autocomplete="new-password" minlength="6" />
+        </label>
+        <label>Yeni Şifre (tekrar)
+          <input type="password" id="fgPass2" autocomplete="new-password" minlength="6" />
+        </label>
+      </div>
+      <button type="submit" class="btn primary" id="fgSubmit">Kod Gönder</button>
+      <div id="fgNotice" class="notice pos hidden"></div>
+      <div id="fgError" class="error hidden"></div>
+      <a href="#" id="fgResend" class="login-link hidden">Kodu tekrar gönder</a>
+      <a href="#" id="fgBack" class="login-link">Girişe dön</a>
     </form>
   </div>
 

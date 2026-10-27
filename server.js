@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
@@ -140,6 +141,97 @@ app.get('/api/me', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Sunucu hatasi' });
+  }
+});
+
+// ---- Sifremi unuttum: kayitli Telegram'a kod gonder, kodla yeni parola belirle ----
+const RESET_CODE_TTL_MIN = 10;
+const RESET_MAX_ATTEMPTS = 5;
+const RESET_RESEND_SEC = 60;
+
+// Kullanici adinin var olup olmadigi disaridan anlasilmasin diye yanit her durumda ayni
+app.post('/api/forgot-password', async (req, res) => {
+  const username = String((req.body && req.body.username) || '').trim();
+  if (!username) return res.status(400).json({ error: 'Kullanici adi gerekli' });
+  const reply = () =>
+    res.json({ ok: true, message: 'Kayıtlı Telegram hesabınız varsa kod gönderildi. Yoksa yöneticinize başvurun.' });
+  try {
+    const r = await db.query(
+      `SELECT u.id, t.chat_id FROM users u LEFT JOIN telegram_settings t ON t.user_id = u.id
+        WHERE u.username = $1`,
+      [username]
+    );
+    const row = r.rows[0];
+    if (!row || !row.chat_id) return reply();
+    const last = await db.query(
+      `SELECT 1 FROM password_resets WHERE user_id = $1 AND created_at > now() - ($2 || ' seconds')::interval`,
+      [row.id, String(RESET_RESEND_SEC)]
+    );
+    if (last.rows.length) return reply(); // cok sik istek: yeni kod gonderme
+    const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    const hash = await bcrypt.hash(code, 10);
+    await db.query(
+      `INSERT INTO password_resets (user_id, code_hash, expires_at, attempts, created_at)
+       VALUES ($1, $2, now() + ($3 || ' minutes')::interval, 0, now())
+       ON CONFLICT (user_id) DO UPDATE SET code_hash = EXCLUDED.code_hash, expires_at = EXCLUDED.expires_at,
+         attempts = 0, created_at = now()`,
+      [row.id, hash, String(RESET_CODE_TTL_MIN)]
+    );
+    const sent = await telegram.send(
+      row.chat_id,
+      `🔐 <b>Şifre sıfırlama kodunuz: ${code}</b>\n${RESET_CODE_TTL_MIN} dakika geçerlidir. Bu isteği siz yapmadıysanız dikkate almayın.`
+    );
+    if (!sent.ok) console.warn('Sifre sifirlama kodu gonderilemedi:', sent.error);
+    reply();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatasi' });
+  }
+});
+
+app.post('/api/reset-password', async (req, res) => {
+  const { username, code, newPassword } = req.body || {};
+  if (!username || !code || !newPassword) {
+    return res.status(400).json({ error: 'Kullanici adi, kod ve yeni parola gerekli' });
+  }
+  if (String(newPassword).length < 6) {
+    return res.status(400).json({ error: 'Yeni parola en az 6 karakter olmali' });
+  }
+  const invalid = () => res.status(400).json({ error: 'Kod gecersiz veya suresi dolmus' });
+  try {
+    const r = await db.query(
+      `SELECT u.id, p.code_hash, p.attempts, (p.expires_at < now()) AS expired, t.chat_id
+         FROM users u
+         JOIN password_resets p ON p.user_id = u.id
+         LEFT JOIN telegram_settings t ON t.user_id = u.id
+        WHERE u.username = $1`,
+      [String(username).trim()]
+    );
+    const row = r.rows[0];
+    if (!row || row.expired || row.attempts >= RESET_MAX_ATTEMPTS) return invalid();
+    if (!(await bcrypt.compare(String(code).trim(), row.code_hash))) {
+      await db.query('UPDATE password_resets SET attempts = attempts + 1 WHERE user_id = $1', [row.id]);
+      return invalid();
+    }
+    if (await isInRecentPasswords(row.id, newPassword, 3)) {
+      return res.status(400).json({ error: 'Son 3 parolanizdan birini tekrar kullanamazsiniz' });
+    }
+    const hash = await bcrypt.hash(newPassword, 10);
+    await db.query('UPDATE users SET password = $1, must_change_password = false WHERE id = $2', [
+      hash,
+      row.id,
+    ]);
+    await db.query('INSERT INTO password_history (user_id, password) VALUES ($1, $2)', [row.id, hash]);
+    await db.query('DELETE FROM password_resets WHERE user_id = $1', [row.id]);
+    if (row.chat_id) {
+      telegram
+        .send(row.chat_id, '✅ Şifreniz değiştirildi. Bu işlemi siz yapmadıysanız hemen yöneticinize başvurun.')
+        .catch(() => {});
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Parola degistirilemedi' });
   }
 });
 
