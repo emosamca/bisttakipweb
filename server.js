@@ -4,6 +4,9 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
+const PgSession = require('connect-pg-simple')(session);
+const helmet = require('helmet');
+const { rateLimit } = require('express-rate-limit');
 const bcrypt = require('bcryptjs');
 
 const db = require('./db');
@@ -21,15 +24,60 @@ const fundsportfolio = require('./fundsportfolio');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+if (!process.env.SESSION_SECRET) {
+  console.error('SESSION_SECRET tanimli degil. .env dosyasina uzun, rastgele bir deger ekleyin.');
+  process.exit(1);
+}
+
+// IIS ters proxy ayni makineden yonlendirir; gercek istemci IP'si X-Forwarded-For'dan okunur
+app.set('trust proxy', 'loopback');
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        'script-src': ["'self'"],
+        'style-src': ["'self'", "'unsafe-inline'"], // index.html/app.js'te inline style="" kullaniliyor
+        'img-src': ["'self'", 'data:'],
+        'connect-src': ["'self'"],
+        'upgrade-insecure-requests': null, // HTTP uzerinden de calissin
+      },
+    },
+    strictTransportSecurity: false, // HTTPS zorlamasi IIS tarafinda karar verilsin
+  })
+);
 app.use(express.json());
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || 'degistirin-bu-anahtari',
+    store: new PgSession({ pool: db.sessionPool, tableName: 'session' }),
+    name: 'bist.sid',
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { httpOnly: true, maxAge: 1000 * 60 * 60 * 24 * 7 }, // 7 gun
+    proxy: true,
+    // secure 'auto': HTTPS ise secure isaretlenir, HTTP'de de calisir
+    cookie: { httpOnly: true, sameSite: 'lax', secure: 'auto', maxAge: 1000 * 60 * 60 * 24 * 7 }, // 7 gun
   })
 );
+
+// Giris ve sifre sifirlama uclari icin IP basina deneme siniri
+const limitMessage = { error: 'Çok fazla deneme. Lütfen 15 dakika sonra tekrar deneyin.' };
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  skipSuccessfulRequests: true, // yalnizca basarisiz girisler sayilir
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: limitMessage,
+});
+const resetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: limitMessage,
+});
 
 // ---- Yardimcilar ----
 // Parola degisimi zorunluyken yalnizca bu yollara izin var
@@ -86,7 +134,7 @@ function computeTotal(qty, price, commissionRate, bsmvRate) {
 }
 
 // ---- Kimlik dogrulama ----
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: 'Kullanici adi ve sifre gerekli' });
@@ -150,7 +198,7 @@ const RESET_MAX_ATTEMPTS = 5;
 const RESET_RESEND_SEC = 60;
 
 // Kullanici adinin var olup olmadigi disaridan anlasilmasin diye yanit her durumda ayni
-app.post('/api/forgot-password', async (req, res) => {
+app.post('/api/forgot-password', resetLimiter, async (req, res) => {
   const username = String((req.body && req.body.username) || '').trim();
   if (!username) return res.status(400).json({ error: 'Kullanici adi gerekli' });
   const reply = () =>
@@ -189,7 +237,7 @@ app.post('/api/forgot-password', async (req, res) => {
   }
 });
 
-app.post('/api/reset-password', async (req, res) => {
+app.post('/api/reset-password', resetLimiter, async (req, res) => {
   const { username, code, newPassword } = req.body || {};
   if (!username || !code || !newPassword) {
     return res.status(400).json({ error: 'Kullanici adi, kod ve yeni parola gerekli' });

@@ -66,6 +66,14 @@ CREATE TABLE IF NOT EXISTS password_history (
 );
 CREATE INDEX IF NOT EXISTS idx_pwhist_user ON password_history(user_id);
 
+-- Oturumlar (connect-pg-simple); sunucu yeniden baslasa da kullanicilar girisli kalir
+CREATE TABLE IF NOT EXISTS "session" (
+  sid     VARCHAR NOT NULL PRIMARY KEY,
+  sess    JSON NOT NULL,
+  expire  TIMESTAMP(6) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_session_expire ON "session"(expire);
+
 -- Sifremi unuttum: Telegram'a gonderilen tek kullanimlik kod (kullanici basina tek aktif kod)
 CREATE TABLE IF NOT EXISTS password_resets (
   user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -597,6 +605,8 @@ async function listen(channel, onNotify) {
 module.exports = {
   query: (text, params) => pool.query(text, params),
   getClient: () => pool.connect(),
+  // Oturum deposu icin: pool init()'te SSL fallback ile degisebildiginden her cagrida guncelini kullan
+  sessionPool: { query: (...args) => pool.query(...args) },
   init,
   listen,
 };
