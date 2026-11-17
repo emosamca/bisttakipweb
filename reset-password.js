@@ -1,5 +1,5 @@
 // Sunucuda calisan parola kurtarma komutu (ornegin tek admin sifresini unutursa).
-// Kullanim: node reset-password.js <kullaniciadi> [yeniSifre]
+// Kullanim: node reset-password.js <kullaniciadi|e-posta> [yeniSifre]
 // Sifre verilmezse rastgele gecici sifre uretilir; ilk giriste degistirmek zorunludur.
 require('dotenv').config();
 
@@ -18,7 +18,7 @@ function randomPassword(len = 10) {
 async function main() {
   const [username, given] = process.argv.slice(2);
   if (!username) {
-    console.error('Kullanim: node reset-password.js <kullaniciadi> [yeniSifre]');
+    console.error('Kullanim: node reset-password.js <kullaniciadi|e-posta> [yeniSifre]');
     process.exit(1);
   }
   if (given && given.length < 6) {
@@ -26,7 +26,10 @@ async function main() {
     process.exit(1);
   }
   await db.init();
-  const r = await db.query('SELECT id FROM users WHERE username = $1', [username.trim()]);
+  const r = await db.query(
+    'SELECT id FROM users WHERE username = $1 OR lower(email) = lower($1) ORDER BY (username = $1) DESC LIMIT 1',
+    [username.trim()]
+  );
   if (!r.rows.length) {
     console.error(`Kullanici bulunamadi: ${username}`);
     process.exit(1);

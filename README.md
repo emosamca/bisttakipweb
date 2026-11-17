@@ -33,7 +33,19 @@ PORT=3000
 SESSION_SECRET=...        # production'da mutlaka değiştirin
 DEFAULT_USER=        # ilk açılışta oluşturulur
 DEFAULT_PASSWORD=
+
+# E-posta (dogrulama ve sifre sifirlama kodlari) - Zoho
+SMTP_HOST=smtppro.zoho.eu
+SMTP_PORT=465             # 465: SSL, 587: STARTTLS
+SMTP_USER=iletisim@portfoyum.win
+SMTP_PASS=                # Zoho hesap/uygulama sifresi
+MAIL_FROM=                # istege bagli, varsayilan: "Portföyüm" <SMTP_USER>
+IMAP_HOST=imap.zoho.eu    # bilgi amacli; uygulama yalnizca SMTP ile gonderir
 ```
+
+> E-postası olmayan kullanıcılar giriş yaptıklarında e-posta adreslerini girip
+> adrese gelen kodla doğrulamadan devam edemez. Doğrulamadan sonra girişte
+> e-posta veya kullanıcı adı kullanılabilir.
 
 > İlk başlatmada tablolar otomatik oluşturulur ve varsayılan kullanıcı eklenir
 > (` / `). Giriş yaptıktan sonra `.env`'deki şifreyi değiştirip

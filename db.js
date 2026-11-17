@@ -74,6 +74,16 @@ CREATE TABLE IF NOT EXISTS "session" (
 );
 CREATE INDEX IF NOT EXISTS idx_session_expire ON "session"(expire);
 
+-- E-posta dogrulama: dogrulanacak adres + e-postaya gonderilen tek kullanimlik kod
+CREATE TABLE IF NOT EXISTS email_verifications (
+  user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  email       TEXT NOT NULL,
+  code_hash   TEXT NOT NULL,          -- bcrypt ile hash'lenmis 6 haneli kod
+  expires_at  TIMESTAMPTZ NOT NULL,   -- olusturma + 10 dk
+  attempts    INTEGER NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Sifremi unuttum: Telegram'a gonderilen tek kullanimlik kod (kullanici basina tek aktif kod)
 CREATE TABLE IF NOT EXISTS password_resets (
   user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -383,6 +393,10 @@ const MIGRATIONS = `
 -- Eski users tablosuna yeni sutunlari ekle
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'normal';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false;
+
+-- Dogrulanmis e-posta (giris kullanici adi veya e-posta ile); buyuk/kucuk harf duyarsiz benzersiz
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_key ON users (lower(email));
 
 -- Eski purchases tablosuna komisyon/bsmv sutunlari (eski kayitlar 0)
 ALTER TABLE purchases ADD COLUMN IF NOT EXISTS commission_rate NUMERIC(8,4) NOT NULL DEFAULT 0;

@@ -12,8 +12,8 @@
     <form id="loginForm" class="login-card">
       <h1>📈 BIST Portföy</h1>
       <p class="muted">Devam etmek için giriş yapın</p>
-      <label>Kullanıcı Adı
-        <input type="text" id="loginUser" autocomplete="username" required />
+      <label>E-posta veya Kullanıcı Adı
+        <input type="text" id="loginUser" autocomplete="username" autocapitalize="none" spellcheck="false" required />
       </label>
       <label>Şifre
         <input type="password" id="loginPass" autocomplete="current-password" required />
@@ -24,12 +24,12 @@
       <a href="#" id="forgotLink" class="login-link">Şifremi unuttum</a>
     </form>
 
-    <!-- Sifremi unuttum: 1) kullanici adi -> Telegram'a kod  2) kod + yeni sifre -->
+    <!-- Sifremi unuttum: 1) e-posta/kullanici adi -> e-posta ve Telegram'a kod  2) kod + yeni sifre -->
     <form id="forgotForm" class="login-card hidden">
       <h1>🔐 Şifre Sıfırlama</h1>
-      <p class="muted" id="fgIntro">Kullanıcı adınızı girin; kayıtlı Telegram hesabınıza bir kod gönderilecek.</p>
-      <label>Kullanıcı Adı
-        <input type="text" id="fgUser" autocomplete="username" required />
+      <p class="muted" id="fgIntro">E-posta adresinizi veya kullanıcı adınızı girin; kayıtlı e-posta adresinize (ve varsa Telegram hesabınıza) bir kod gönderilecek.</p>
+      <label>E-posta veya Kullanıcı Adı
+        <input type="text" id="fgUser" autocomplete="username" autocapitalize="none" spellcheck="false" required />
       </label>
       <div id="fgStep2" class="hidden">
         <label>Kod
@@ -94,6 +94,7 @@
       <button class="btn block hidden" id="openUsers">👥 Kullanıcılar</button>
       <button class="btn block" id="openTelegram">🔔 Bildirim Ayarları</button>
       <button class="btn block" id="openChangePw">🔑 Parola Değiştir</button>
+      <button class="btn block" id="openChangeEmail">✉ E-posta Değiştir</button>
       <div class="sidebar-spacer"></div>
       <div class="user-box">
         <div class="user-meta">
@@ -1280,6 +1281,34 @@
     </form>
   </div>
 
+  <!-- E-POSTA DOGRULAMA MODAL (e-postasi olmayan kullanici icin zorunlu; ayrica e-posta degistirme) -->
+  <div id="emailModal" class="modal hidden">
+    <form class="modal-card" id="emailForm">
+      <div class="modal-head">
+        <h3 id="emTitle">E-posta Değiştir</h3>
+        <button type="button" class="x" data-close id="emClose">×</button>
+      </div>
+      <div class="info-box hidden" id="emForcedNote">Devam etmek için e-posta adresinizi girin ve adresinize gönderilen kodla doğrulayın. Doğrulamadan sonra girişte kullanıcı adı yerine e-posta adresinizi kullanabilirsiniz.</div>
+      <div class="info-box hidden" id="emCurrent"></div>
+      <label>E-posta Adresi
+        <input type="email" id="emEmail" autocomplete="email" autocapitalize="none" spellcheck="false" required />
+      </label>
+      <div id="emStep2" class="hidden">
+        <label>Doğrulama Kodu
+          <input type="text" id="emCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" />
+        </label>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" data-close id="emCancel">İptal</button>
+        <button type="button" class="btn ghost hidden" id="emLogout">Çıkış Yap</button>
+        <button type="submit" class="btn primary" id="emSubmit">Kod Gönder</button>
+      </div>
+      <div class="notice pos hidden" id="emNotice"></div>
+      <div class="error hidden" id="emError"></div>
+      <a href="#" id="emResend" class="login-link hidden">Kodu tekrar gönder / adresi değiştir</a>
+    </form>
+  </div>
+
   <!-- KULLANICI YONETIMI MODAL (admin) -->
   <div id="usersModal" class="modal hidden">
     <div class="modal-card wide">
@@ -1295,7 +1324,7 @@
         <table id="usersTable">
           <thead>
             <tr>
-              <th>Kullanıcı Adı</th><th>Tip</th><th>Parola Durumu</th><th></th>
+              <th>Kullanıcı Adı</th><th>E-posta</th><th>Tip</th><th>Parola Durumu</th><th></th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -1322,6 +1351,9 @@
             <option value="normal" selected>Normal</option>
             <option value="admin">Admin</option>
           </select>
+        </label>
+        <label class="full hidden" id="uEmailWrap">E-posta <span class="muted">(boşaltılırsa kullanıcı sonraki girişte yeniden doğrular)</span>
+          <input type="email" id="uEmail" autocomplete="off" />
         </label>
         <label class="full" id="uPwWrap">Parola <span id="uPwHint" class="muted"></span>
           <input type="password" id="uPassword" autocomplete="new-password" />

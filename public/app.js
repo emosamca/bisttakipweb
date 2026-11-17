@@ -35,6 +35,11 @@ async function api(path, opts = {}) {
     openForcedChange();
     throw new Error(data.error || 'Parola degistirilmeli');
   }
+  // E-posta dogrulamasi zorunluysa (sunucu kapisi) zorunlu e-posta modalini ac
+  if (res.status === 403 && data.needEmail) {
+    openForcedEmail();
+    throw new Error(data.error || 'E-posta dogrulanmali');
+  }
   if (!res.ok) throw new Error(data.error || 'Hata');
   return data;
 }
@@ -61,7 +66,9 @@ function showLogin() {
   $('loginView').classList.remove('hidden');
 }
 let currentRole = 'normal';
-function showApp(username, role, mustChange) {
+let currentEmail = null;
+function showApp(username, role, mustChange, needEmail, email) {
+  currentEmail = email || null;
   $('loginView').classList.add('hidden');
   $('appView').classList.remove('hidden');
   $('userName').textContent = username || '';
@@ -77,6 +84,14 @@ function showApp(username, role, mustChange) {
     openForcedChange(); // zorunlu parola degisimi; pano yuklenmez
     return;
   }
+  if (needEmail) {
+    openForcedEmail(); // zorunlu e-posta dogrulamasi; pano yuklenmez
+    return;
+  }
+  startDashboard();
+}
+
+function startDashboard() {
   refreshAll();
   switchDash('genel'); // ilk acilis: Genel sekmesi + dogru menu durumu
   connectEvents();
@@ -168,7 +183,7 @@ $('loginForm').addEventListener('submit', async (e) => {
       method: 'POST',
       body: JSON.stringify({ username: $('loginUser').value, password: $('loginPass').value }),
     });
-    showApp(data.username, data.role, data.mustChange);
+    showApp(data.username, data.role, data.mustChange, data.needEmail, data.email);
   } catch (e2) {
     err.textContent = e2.message;
     err.classList.remove('hidden');
@@ -1693,16 +1708,112 @@ $('pwForm').addEventListener('submit', async (e) => {
     $('pwModal').classList.remove('locked');
     closeModal('pwModal');
     if (pwForced) {
-      // zorunlu degisim tamam: panoyu yukle
+      // zorunlu degisim tamam: e-posta yoksa once onu dogrulat, sonra panoyu yukle
       pwForced = false;
-      refreshAll();
-      connectEvents();
+      const me = await api('/api/me').catch(() => ({}));
+      if (me.needEmail) openForcedEmail();
+      else startDashboard();
     } else {
       alert('Parolanız değiştirildi.');
     }
   } catch (e2) {
     err.textContent = e2.message;
     err.classList.remove('hidden');
+  }
+});
+
+// ---- E-posta dogrulama (e-postasi olmayan icin zorunlu) + e-posta degistir ----
+let emForced = false;
+
+function emResetSteps() {
+  $('emailForm').reset();
+  $('emEmail').readOnly = false;
+  $('emStep2').classList.add('hidden');
+  $('emCode').required = false;
+  $('emResend').classList.add('hidden');
+  $('emSubmit').textContent = 'Kod Gönder';
+  showMsg('emNotice', '');
+  showMsg('emError', '');
+}
+
+function openEmailModal(forced) {
+  emForced = forced;
+  emResetSteps();
+  $('emTitle').textContent = forced ? 'E-posta Adresinizi Doğrulayın' : 'E-posta Değiştir';
+  $('emForcedNote').classList.toggle('hidden', !forced);
+  showMsg('emCurrent', !forced && currentEmail ? `Kayıtlı e-posta: ${currentEmail}` : '');
+  // zorunlu: kapatma/iptal yok, yalnizca cikis
+  $('emClose').classList.toggle('hidden', forced);
+  $('emCancel').classList.toggle('hidden', forced);
+  $('emLogout').classList.toggle('hidden', !forced);
+  $('emailModal').classList.toggle('locked', forced);
+  openModal('emailModal');
+  $('emEmail').focus();
+}
+function openForcedEmail() {
+  if (emForced && !$('emailModal').classList.contains('hidden')) return; // zaten acik
+  openEmailModal(true);
+}
+
+async function sendEmailCode() {
+  const data = await api('/api/email/send-code', {
+    method: 'POST',
+    body: JSON.stringify({ email: $('emEmail').value.trim() }),
+  });
+  $('emEmail').readOnly = true;
+  $('emStep2').classList.remove('hidden');
+  $('emCode').required = true;
+  $('emResend').classList.remove('hidden');
+  $('emSubmit').textContent = 'Doğrula';
+  showMsg('emNotice', (data.message || 'Kod gönderildi.') + ' Gelen kutunuzu (ve spam klasörünü) kontrol edin.');
+  $('emCode').value = '';
+  $('emCode').focus();
+}
+
+$('openChangeEmail').addEventListener('click', () => openEmailModal(false));
+
+$('emResend').addEventListener('click', (e) => {
+  e.preventDefault();
+  const email = $('emEmail').value;
+  emResetSteps();
+  $('emEmail').value = email; // adresi duzeltip yeniden kod istenebilir
+  $('emEmail').focus();
+});
+
+$('emLogout').addEventListener('click', async () => {
+  await api('/api/logout', { method: 'POST' }).catch(() => {});
+  emForced = false;
+  $('emailModal').classList.remove('locked');
+  closeModal('emailModal');
+  disconnectEvents();
+  showLogin();
+});
+
+$('emailForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  showMsg('emError', '');
+  try {
+    if ($('emStep2').classList.contains('hidden')) {
+      await sendEmailCode();
+      return;
+    }
+    const data = await api('/api/email/verify', {
+      method: 'POST',
+      body: JSON.stringify({ code: $('emCode').value.trim() }),
+    });
+    currentEmail = data.email;
+    $('loginUser').value = data.email; // sonraki giriste e-posta yazili gelsin
+    $('emailModal').classList.remove('locked');
+    closeModal('emailModal');
+    if (emForced) {
+      emForced = false;
+      startDashboard();
+      alert(`E-posta adresiniz doğrulandı. Bundan sonra girişte ${data.email} adresini kullanabilirsiniz.`);
+    } else {
+      alert(`E-posta adresiniz ${data.email} olarak güncellendi.`);
+    }
+  } catch (e2) {
+    showMsg('emError', e2.message);
   }
 });
 
@@ -1723,6 +1834,7 @@ async function loadUsers() {
       .map(
         (u) => `<tr>
           <td><strong>${esc(u.username)}</strong></td>
+          <td>${u.email ? esc(u.email) : '<span class="muted">Doğrulanmadı</span>'}</td>
           <td><span class="role-badge ${u.role}">${u.role === 'admin' ? 'admin' : 'normal'}</span></td>
           <td>${u.must_change_password ? '<span class="muted">İlk giriş parolası bekliyor</span>' : 'Aktif'}</td>
           <td><div class="row-actions">
@@ -1755,10 +1867,13 @@ function openUserForm(user) {
     $('uId').value = user.id;
     $('uUsername').value = user.username;
     $('uRole').value = user.role;
+    $('uEmail').value = user.email || '';
+    $('uEmailWrap').classList.remove('hidden');
     $('uPwHint').textContent = '(boş bırakılırsa değişmez)';
     $('uPassword').required = false;
   } else {
     $('userFormTitle').textContent = 'Yeni Kullanıcı';
+    $('uEmailWrap').classList.add('hidden'); // yeni kullanici e-postasini ilk giriste kendisi dogrular
     $('uId').value = '';
     $('uRole').value = 'normal';
     $('uPwHint').textContent = '(en az 6 karakter)';
@@ -1780,6 +1895,7 @@ $('userForm').addEventListener('submit', async (e) => {
   };
   const pw = $('uPassword').value;
   if (pw) body.password = pw;
+  if (id) body.email = $('uEmail').value.trim();
   try {
     await api(id ? `/api/users/${id}` : '/api/users', {
       method: id ? 'PUT' : 'POST',
@@ -4548,7 +4664,7 @@ $('tufeForm').addEventListener('submit', async (e) => {
 (async () => {
   try {
     const me = await api('/api/me');
-    showApp(me.username, me.role, me.mustChange);
+    showApp(me.username, me.role, me.mustChange, me.needEmail, me.email);
   } catch {
     showLogin();
   }

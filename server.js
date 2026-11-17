@@ -20,6 +20,7 @@ const currencyportfolio = require('./currencyportfolio');
 const cryptoportfolio = require('./cryptoportfolio');
 const binance = require('./binance');
 const telegram = require('./telegram');
+const mailer = require('./mailer');
 const achievements = require('./achievements');
 const fund = require('./fund');
 const fundsportfolio = require('./fundsportfolio');
@@ -126,10 +127,21 @@ const resetLimiter = rateLimit({
   legacyHeaders: false,
   message: limitMessage,
 });
+// E-posta dogrulama (kod gonder + dogrula) icin ayri, biraz daha genis sinir
+const emailLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: limitMessage,
+});
 
 // ---- Yardimcilar ----
 // Parola degisimi zorunluyken yalnizca bu yollara izin var
 const ALLOW_DURING_CHANGE = new Set(['/api/change-password', '/api/logout', '/api/me']);
+// E-posta dogrulanmamisken yalnizca bu yollara izin var
+const ALLOW_DURING_EMAIL = new Set(['/api/email/send-code', '/api/email/verify', '/api/logout', '/api/me']);
+const EMAIL_REQUIRED = { error: 'Once e-posta adresinizi dogrulamalisiniz', needEmail: true };
 
 function requireAuth(req, res, next) {
   if (!(req.session && req.session.userId)) {
@@ -137,6 +149,9 @@ function requireAuth(req, res, next) {
   }
   if (req.session.mustChange && !ALLOW_DURING_CHANGE.has(req.path)) {
     return res.status(403).json({ error: 'Once parolanizi degistirmelisiniz', mustChange: true });
+  }
+  if (req.session.needEmail && !req.session.mustChange && !ALLOW_DURING_EMAIL.has(req.path)) {
+    return res.status(403).json(EMAIL_REQUIRED);
   }
   next();
 }
@@ -146,13 +161,14 @@ async function requireAdmin(req, res, next) {
     return res.status(401).json({ error: 'Giris yapilmamis' });
   }
   try {
-    const r = await db.query('SELECT role, must_change_password FROM users WHERE id = $1', [
+    const r = await db.query('SELECT role, must_change_password, email FROM users WHERE id = $1', [
       req.session.userId,
     ]);
     if (!r.rows.length) return res.status(401).json({ error: 'Kullanici bulunamadi' });
     if (r.rows[0].must_change_password) {
       return res.status(403).json({ error: 'Once parolanizi degistirmelisiniz', mustChange: true });
     }
+    if (!r.rows[0].email) return res.status(403).json(EMAIL_REQUIRED);
     if (r.rows[0].role !== 'admin') return res.status(403).json({ error: 'Yetkiniz yok' });
     next();
   } catch (err) {
@@ -173,6 +189,19 @@ async function isInRecentPasswords(userId, newPlain, n = 3) {
   return false;
 }
 
+// E-posta bicimi (basit kontrol) + kucuk harfe normalize
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+function normalizeEmail(v) {
+  const s = String(v || '').trim().toLowerCase();
+  return s && s.length <= 254 && EMAIL_RE.test(s) ? s : null;
+}
+
+// Giris/sifre sifirlamada kullanici adi VEYA e-posta ile kullanici bulma kosulu ($1)
+const USER_LOGIN_MATCH = '(u.username = $1 OR lower(u.email) = lower($1))';
+
+// 6 haneli tek kullanimlik kod
+const newCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+
 // Toplam maliyet = ara toplam + komisyon, sonra komisyon uzerine bsmv
 function computeTotal(qty, price, commissionRate, bsmvRate) {
   const base = qty * price;
@@ -185,27 +214,34 @@ function computeTotal(qty, price, commissionRate, bsmvRate) {
 app.post('/api/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
-    return res.status(400).json({ error: 'Kullanici adi ve sifre gerekli' });
+    return res.status(400).json({ error: 'E-posta/kullanici adi ve sifre gerekli' });
   }
   try {
-    const r = await db.query('SELECT * FROM users WHERE username = $1', [username.trim()]);
+    // Kullanici adi veya dogrulanmis e-posta ile giris (kullanici adi eslesmesi oncelikli)
+    const r = await db.query(
+      `SELECT * FROM users u WHERE ${USER_LOGIN_MATCH} ORDER BY (u.username = $1) DESC LIMIT 1`,
+      [String(username).trim()]
+    );
     if (r.rows.length === 0) {
-      return res.status(401).json({ error: 'Kullanici adi veya sifre hatali' });
+      return res.status(401).json({ error: 'E-posta/kullanici adi veya sifre hatali' });
     }
     const user = r.rows[0];
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) {
-      return res.status(401).json({ error: 'Kullanici adi veya sifre hatali' });
+      return res.status(401).json({ error: 'E-posta/kullanici adi veya sifre hatali' });
     }
     req.session.userId = user.id;
     req.session.username = user.username;
     req.session.role = user.role;
     req.session.mustChange = user.must_change_password;
+    req.session.needEmail = !user.email;
     res.json({
       ok: true,
       username: user.username,
+      email: user.email,
       role: user.role,
       mustChange: user.must_change_password,
+      needEmail: !user.email,
     });
   } catch (err) {
     console.error(err);
@@ -223,16 +259,20 @@ app.get('/api/me', async (req, res) => {
   }
   try {
     const r = await db.query(
-      'SELECT username, role, must_change_password FROM users WHERE id = $1',
+      'SELECT username, email, role, must_change_password FROM users WHERE id = $1',
       [req.session.userId]
     );
     if (!r.rows.length) return res.status(401).json({ error: 'Kullanici bulunamadi' });
-    req.session.role = r.rows[0].role;
-    req.session.mustChange = r.rows[0].must_change_password;
+    const u = r.rows[0];
+    req.session.role = u.role;
+    req.session.mustChange = u.must_change_password;
+    req.session.needEmail = !u.email;
     res.json({
-      username: r.rows[0].username,
-      role: r.rows[0].role,
-      mustChange: r.rows[0].must_change_password,
+      username: u.username,
+      email: u.email,
+      role: u.role,
+      mustChange: u.must_change_password,
+      needEmail: !u.email,
     });
   } catch (err) {
     console.error(err);
@@ -240,7 +280,82 @@ app.get('/api/me', async (req, res) => {
   }
 });
 
-// ---- Sifremi unuttum: kayitli Telegram'a kod gonder, kodla yeni parola belirle ----
+// ---- E-posta dogrulama: adrese kod gonder, kodla dogrula (ilk kayit ve degisiklik) ----
+const EMAIL_CODE_TTL_MIN = 10;
+const EMAIL_MAX_ATTEMPTS = 5;
+const EMAIL_RESEND_SEC = 60;
+
+app.post('/api/email/send-code', requireAuth, emailLimiter, async (req, res) => {
+  const email = normalizeEmail(req.body && req.body.email);
+  if (!email) return res.status(400).json({ error: 'Gecerli bir e-posta adresi girin' });
+  const userId = req.session.userId;
+  try {
+    const taken = await db.query('SELECT id FROM users WHERE lower(email) = $1 AND id <> $2', [email, userId]);
+    if (taken.rows.length) return res.status(409).json({ error: 'Bu e-posta baska bir hesapta kayitli' });
+    const last = await db.query(
+      `SELECT 1 FROM email_verifications
+        WHERE user_id = $1 AND email = $2 AND created_at > now() - ($3 || ' seconds')::interval`,
+      [userId, email, String(EMAIL_RESEND_SEC)]
+    );
+    if (last.rows.length) {
+      return res.status(429).json({ error: `Yeni kod icin ${EMAIL_RESEND_SEC} saniye bekleyin` });
+    }
+    const code = newCode();
+    const sent = await mailer.send(
+      email,
+      `Portföyüm doğrulama kodunuz: ${code}`,
+      `E-posta doğrulama kodunuz: ${code}\n\nKod ${EMAIL_CODE_TTL_MIN} dakika geçerlidir. Bu isteği siz yapmadıysanız dikkate almayın.`,
+      `<p>E-posta doğrulama kodunuz:</p><p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p>` +
+        `<p>Kod ${EMAIL_CODE_TTL_MIN} dakika geçerlidir. Bu isteği siz yapmadıysanız dikkate almayın.</p>`
+    );
+    if (!sent.ok) {
+      console.warn('E-posta dogrulama kodu gonderilemedi:', sent.error);
+      return res.status(502).json({ error: 'Kod e-postasi gonderilemedi. Adresi kontrol edip tekrar deneyin.' });
+    }
+    const hash = await bcrypt.hash(code, 10);
+    await db.query(
+      `INSERT INTO email_verifications (user_id, email, code_hash, expires_at, attempts, created_at)
+       VALUES ($1, $2, $3, now() + ($4 || ' minutes')::interval, 0, now())
+       ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, code_hash = EXCLUDED.code_hash,
+         expires_at = EXCLUDED.expires_at, attempts = 0, created_at = now()`,
+      [userId, email, hash, String(EMAIL_CODE_TTL_MIN)]
+    );
+    res.json({ ok: true, message: `${email} adresine doğrulama kodu gönderildi.` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatasi' });
+  }
+});
+
+app.post('/api/email/verify', requireAuth, emailLimiter, async (req, res) => {
+  const code = String((req.body && req.body.code) || '').trim();
+  if (!code) return res.status(400).json({ error: 'Kod gerekli' });
+  const userId = req.session.userId;
+  const invalid = () => res.status(400).json({ error: 'Kod gecersiz veya suresi dolmus' });
+  try {
+    const r = await db.query(
+      `SELECT email, code_hash, attempts, (expires_at < now()) AS expired
+         FROM email_verifications WHERE user_id = $1`,
+      [userId]
+    );
+    const row = r.rows[0];
+    if (!row || row.expired || row.attempts >= EMAIL_MAX_ATTEMPTS) return invalid();
+    if (!(await bcrypt.compare(code, row.code_hash))) {
+      await db.query('UPDATE email_verifications SET attempts = attempts + 1 WHERE user_id = $1', [userId]);
+      return invalid();
+    }
+    await db.query('UPDATE users SET email = $1 WHERE id = $2', [row.email, userId]);
+    await db.query('DELETE FROM email_verifications WHERE user_id = $1', [userId]);
+    req.session.needEmail = false;
+    res.json({ ok: true, email: row.email });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Bu e-posta baska bir hesapta kayitli' });
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatasi' });
+  }
+});
+
+// ---- Sifremi unuttum: kayitli e-posta ve/veya Telegram'a kod gonder, kodla yeni parola belirle ----
 const RESET_CODE_TTL_MIN = 10;
 const RESET_MAX_ATTEMPTS = 5;
 const RESET_RESEND_SEC = 60;
@@ -248,23 +363,26 @@ const RESET_RESEND_SEC = 60;
 // Kullanici adinin var olup olmadigi disaridan anlasilmasin diye yanit her durumda ayni
 app.post('/api/forgot-password', resetLimiter, async (req, res) => {
   const username = String((req.body && req.body.username) || '').trim();
-  if (!username) return res.status(400).json({ error: 'Kullanici adi gerekli' });
+  if (!username) return res.status(400).json({ error: 'E-posta veya kullanici adi gerekli' });
   const reply = () =>
-    res.json({ ok: true, message: 'Kayıtlı Telegram hesabınız varsa kod gönderildi. Yoksa yöneticinize başvurun.' });
+    res.json({
+      ok: true,
+      message: 'Kayıtlı e-posta adresiniz veya Telegram hesabınız varsa kod gönderildi. Yoksa yöneticinize başvurun.',
+    });
   try {
     const r = await db.query(
-      `SELECT u.id, t.chat_id FROM users u LEFT JOIN telegram_settings t ON t.user_id = u.id
-        WHERE u.username = $1`,
+      `SELECT u.id, u.email, t.chat_id FROM users u LEFT JOIN telegram_settings t ON t.user_id = u.id
+        WHERE ${USER_LOGIN_MATCH} ORDER BY (u.username = $1) DESC LIMIT 1`,
       [username]
     );
     const row = r.rows[0];
-    if (!row || !row.chat_id) return reply();
+    if (!row || (!row.chat_id && !row.email)) return reply();
     const last = await db.query(
       `SELECT 1 FROM password_resets WHERE user_id = $1 AND created_at > now() - ($2 || ' seconds')::interval`,
       [row.id, String(RESET_RESEND_SEC)]
     );
     if (last.rows.length) return reply(); // cok sik istek: yeni kod gonderme
-    const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    const code = newCode();
     const hash = await bcrypt.hash(code, 10);
     await db.query(
       `INSERT INTO password_resets (user_id, code_hash, expires_at, attempts, created_at)
@@ -273,11 +391,28 @@ app.post('/api/forgot-password', resetLimiter, async (req, res) => {
          attempts = 0, created_at = now()`,
       [row.id, hash, String(RESET_CODE_TTL_MIN)]
     );
-    const sent = await telegram.send(
-      row.chat_id,
-      `🔐 <b>Şifre sıfırlama kodunuz: ${code}</b>\n${RESET_CODE_TTL_MIN} dakika geçerlidir. Bu isteği siz yapmadıysanız dikkate almayın.`
-    );
-    if (!sent.ok) console.warn('Sifre sifirlama kodu gonderilemedi:', sent.error);
+    const tail = `${RESET_CODE_TTL_MIN} dakika geçerlidir. Bu isteği siz yapmadıysanız dikkate almayın.`;
+    const jobs = [];
+    if (row.email) {
+      jobs.push(
+        mailer
+          .send(
+            row.email,
+            `Portföyüm şifre sıfırlama kodunuz: ${code}`,
+            `Şifre sıfırlama kodunuz: ${code}\n\n${tail}`,
+            `<p>Şifre sıfırlama kodunuz:</p><p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p><p>${tail}</p>`
+          )
+          .then((s) => s.ok || console.warn('Sifre sifirlama e-postasi gonderilemedi:', s.error))
+      );
+    }
+    if (row.chat_id) {
+      jobs.push(
+        telegram
+          .send(row.chat_id, `🔐 <b>Şifre sıfırlama kodunuz: ${code}</b>\n${tail}`)
+          .then((s) => s.ok || console.warn('Sifre sifirlama kodu Telegram\'a gonderilemedi:', s.error))
+      );
+    }
+    await Promise.all(jobs);
     reply();
   } catch (err) {
     console.error(err);
@@ -288,7 +423,7 @@ app.post('/api/forgot-password', resetLimiter, async (req, res) => {
 app.post('/api/reset-password', resetLimiter, async (req, res) => {
   const { username, code, newPassword } = req.body || {};
   if (!username || !code || !newPassword) {
-    return res.status(400).json({ error: 'Kullanici adi, kod ve yeni parola gerekli' });
+    return res.status(400).json({ error: 'E-posta/kullanici adi, kod ve yeni parola gerekli' });
   }
   if (String(newPassword).length < 6) {
     return res.status(400).json({ error: 'Yeni parola en az 6 karakter olmali' });
@@ -296,11 +431,11 @@ app.post('/api/reset-password', resetLimiter, async (req, res) => {
   const invalid = () => res.status(400).json({ error: 'Kod gecersiz veya suresi dolmus' });
   try {
     const r = await db.query(
-      `SELECT u.id, p.code_hash, p.attempts, (p.expires_at < now()) AS expired, t.chat_id
+      `SELECT u.id, u.email, p.code_hash, p.attempts, (p.expires_at < now()) AS expired, t.chat_id
          FROM users u
          JOIN password_resets p ON p.user_id = u.id
          LEFT JOIN telegram_settings t ON t.user_id = u.id
-        WHERE u.username = $1`,
+        WHERE ${USER_LOGIN_MATCH} ORDER BY (u.username = $1) DESC LIMIT 1`,
       [String(username).trim()]
     );
     const row = r.rows[0];
@@ -322,6 +457,15 @@ app.post('/api/reset-password', resetLimiter, async (req, res) => {
     if (row.chat_id) {
       telegram
         .send(row.chat_id, '✅ Şifreniz değiştirildi. Bu işlemi siz yapmadıysanız hemen yöneticinize başvurun.')
+        .catch(() => {});
+    }
+    if (row.email) {
+      mailer
+        .send(
+          row.email,
+          'Portföyüm şifreniz değiştirildi',
+          'Şifreniz değiştirildi. Bu işlemi siz yapmadıysanız hemen yöneticinize başvurun.'
+        )
         .catch(() => {});
     }
     res.json({ ok: true });
@@ -370,7 +514,7 @@ app.post('/api/change-password', requireAuth, async (req, res) => {
 app.get('/api/users', requireAdmin, async (req, res) => {
   try {
     const r = await db.query(
-      `SELECT id, username, role, must_change_password, created_at
+      `SELECT id, username, email, role, must_change_password, created_at
          FROM users ORDER BY username`
     );
     res.json(r.rows);
@@ -411,13 +555,23 @@ app.post('/api/users', requireAdmin, async (req, res) => {
 
 app.put('/api/users/:id', requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
-  const { username, role, password } = req.body || {};
+  const { username, role, password, email } = req.body || {};
   try {
     const t = await db.query('SELECT * FROM users WHERE id = $1', [id]);
     if (!t.rows.length) return res.status(404).json({ error: 'Kullanici bulunamadi' });
     const target = t.rows[0];
     const newRole = role ? (role === 'admin' ? 'admin' : 'normal') : target.role;
     const newUsername = username ? username.trim() : target.username;
+
+    // E-posta: gonderilmediyse degismez; bos -> NULL (kullanici bir sonraki giriste yeniden dogrular)
+    let newEmail = target.email;
+    if (email !== undefined) {
+      if (String(email).trim() === '') newEmail = null;
+      else {
+        newEmail = normalizeEmail(email);
+        if (!newEmail) return res.status(400).json({ error: 'Gecerli bir e-posta adresi girin' });
+      }
+    }
 
     // Son admin'in yetkisini dusurmeyi engelle
     if (target.role === 'admin' && newRole !== 'admin') {
@@ -433,21 +587,30 @@ app.put('/api/users/:id', requireAdmin, async (req, res) => {
       }
       const hash = await bcrypt.hash(password, 10);
       await db.query(
-        'UPDATE users SET username = $1, role = $2, password = $3, must_change_password = true WHERE id = $4',
-        [newUsername, newRole, hash, id]
+        'UPDATE users SET username = $1, role = $2, email = $3, password = $4, must_change_password = true WHERE id = $5',
+        [newUsername, newRole, newEmail, hash, id]
       );
       await db.query('INSERT INTO password_history (user_id, password) VALUES ($1, $2)', [id, hash]);
     } else {
-      await db.query('UPDATE users SET username = $1, role = $2 WHERE id = $3', [
+      await db.query('UPDATE users SET username = $1, role = $2, email = $3 WHERE id = $4', [
         newUsername,
         newRole,
+        newEmail,
         id,
       ]);
     }
-    if (id === req.session.userId) req.session.role = newRole;
+    if (id === req.session.userId) {
+      req.session.role = newRole;
+      req.session.needEmail = !newEmail;
+    }
     res.json({ ok: true });
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Bu kullanici adi zaten var' });
+    if (err.code === '23505') {
+      const msg = String(err.constraint || '').includes('email')
+        ? 'Bu e-posta baska bir hesapta kayitli'
+        : 'Bu kullanici adi zaten var';
+      return res.status(409).json({ error: msg });
+    }
     console.error(err);
     res.status(500).json({ error: 'Guncellenemedi' });
   }
@@ -3184,6 +3347,9 @@ async function ensureDefaultUser() {
   try {
     await db.init();
     await ensureDefaultUser();
+    if (!mailer.configured()) {
+      console.warn('SMTP tanimli degil (SMTP_HOST/SMTP_USER/SMTP_PASS): e-posta dogrulama kodlari gonderilemez.');
+    }
     // Fiyat tablosu degisince (web UI veya Windows servisi) istemcilere bildir
     await db.listen('price_change', (symbol) => {
       broadcast('price_change', { symbol: symbol || null, at: Date.now() });
